@@ -70,7 +70,7 @@
     });
   });
   const V = (x, y, z) => ({ x, y, z }),
-    rest = [V(-0.43, 0.145, 0.56), V(0.13, 0.145, 0.56)];
+    rest = [V(-0.47, 0.123, 0.91), V(0.27, 0.123, 0.89)];
   class Motion {
     constructor(profile = 'ink') {
       this.profile = profile;
