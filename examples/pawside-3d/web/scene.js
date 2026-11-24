@@ -7,11 +7,11 @@
   const globe = new T.SphereGeometry(1, 42, 28);
   const palettes = {
     ink: {
-      fur: '#302b32',
+      fur: '#242329',
       shade: '#131216',
       light: '#26242b',
       stripe: '#29272e',
-      eye: '#efb13e',
+      eye: '#d8a959',
     },
     chestnut: {
       fur: '#cb8f67',
@@ -54,10 +54,10 @@
       mat
     );
   }
-  function whisker(head, mat, points) {
+  function whisker(head, mat, points, radius = 0.0085) {
     const path = new T.CubicBezierCurve3(...points.map((p) => V(...p)));
     const rings = 22, sides = 7;
-    const geom = new T.TubeGeometry(path, rings, 0.0105, sides, false);
+    const geom = new T.TubeGeometry(path, rings, radius, sides, false);
     const pos = geom.attributes.position, center = V(0,0,0), point = V(0,0,0);
     for (let j = 0; j <= rings; j++) {
       const t = j / rings;
@@ -141,6 +141,49 @@
     geo.computeVertexNormals();
     return mesh(parent, geo, mat);
   }
+  // Short guard hairs break the cheek silhouette. Each tapered strip grows
+  // from the same head profile and stays attached as the character turns.
+  function cheekFur(head, tint, long) {
+    const points = [], colors = [], indices = [];
+    let seed = 73;
+    const random = () => {
+      seed = (1664525 * seed + 1013904223) >>> 0;
+      return seed / 4294967296;
+    };
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < 560; i++) {
+        const y = -.64 + 1.16*random();
+        const angle = -.97 + 1.75*random();
+        const [rx,rz,cz] = headSection(y,long);
+        const x = side*rx*Math.cos(angle);
+        const z = cz+rz*Math.sin(angle);
+        const root = V(x*.996,y,z);
+        const normal = V(side*Math.cos(angle),y*.95,Math.sin(angle)*1.32).normalize();
+        const direction = V(side*.50,-.88,-.20);
+        direction.addScaledVector(normal,-direction.dot(normal)).normalize();
+        const width = V(0,0,0).crossVectors(normal,direction).normalize();
+        const atCheek = 1-T.MathUtils.smoothstep(y,-.15,.49);
+        const length = (.035+.047*random())*(.55+.65*atCheek)*(long?1.58:1);
+        const halfWidth = .004+.006*random();
+        const mid = root.clone().addScaledVector(direction,length*.53).addScaledVector(normal,.009);
+        const tip = root.clone().addScaledVector(direction,length).addScaledVector(normal,.008+.018*random());
+        const index = points.length/3;
+        const shade = .90+.20*random();
+        for (const [center,radius,light] of [[root,-halfWidth,.98],[root,halfWidth,.98],
+          [mid,-halfWidth*.54,1.09],[mid,halfWidth*.54,1.09],[tip,0,1.33]]) {
+          const vertex = center.clone().addScaledVector(width,radius);
+          points.push(vertex.x,vertex.y,vertex.z);
+          colors.push((tint.r+.005)*shade*light,(tint.g+.005)*shade*light,(tint.b+.006)*shade*light);
+        }
+        indices.push(index,index+1,index+2,index+1,index+3,index+2,index+2,index+3,index+4);
+      }
+    }
+    const geometry = new T.BufferGeometry();
+    geometry.setIndex(indices);
+    geometry.setAttribute('position',new T.Float32BufferAttribute(points,3));
+    geometry.setAttribute('color',new T.Float32BufferAttribute(colors,3));
+    mesh(head,geometry,new T.MeshBasicMaterial({vertexColors:true,side:T.DoubleSide}));
+  }
   // Both the head mesh and its attachments sample the same smooth surface.
   // The broad cheek plane narrows into the chin; the muzzle projects forward.
   function headSection(y, long) {
@@ -150,7 +193,7 @@
     const temple = 0.074 * Math.exp(-(((v - 0.56) / 0.35) ** 2));
     const cheek = 1.0 - 0.075 * v + (long ? 0.087 : 0.043) * lower + temple;
     return [
-      circle * cheek,
+      circle * cheek * (1.0 + 0.027*lower),
       circle * (0.753 - 0.040 * v),
       -0.060 + 0.055 * (1 - v)
     ];
@@ -159,7 +202,7 @@
     const padX = (Math.abs(x) - 0.17) / 0.225;
     const padY = (y + 0.255) / 0.178;
     const bridge = Math.exp(-((x / 0.13) ** 2) - ((y + 0.055) / 0.28) ** 2);
-    return 0.149 * Math.exp(-padX * padX - padY * padY) + 0.064 * bridge;
+    return 0.166 * Math.exp(-padX * padX - padY * padY) + 0.064 * bridge;
   }
   function faceDepth(x, y, long) {
     const [rx, rz, z] = headSection(y, long);
@@ -431,24 +474,24 @@
       this.normal.needsUpdate = true;
     }
   }
-  // A broad light across the crown and a compact rim reveal the volume at icon size.
-  function velvetCoat(shader) {
+  // Keep one broad shadow mass across the coat. A grazing light only catches
+  // the upturned outline; a front-facing patch should retain the local fur colour.
+  function coatLight(shader) {
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <opaque_fragment>',
-      `vec3 furNormal = normalize(normal);
-       float light = smoothstep(-0.28, 0.96, dot(furNormal, normalize(vec3(-0.48,0.77,0.51))));
-       float rim = pow(1.0 - abs(dot(furNormal,normalize(vViewPosition))), 2.8);
-       float coolBounce = smoothstep(0.28,0.98,dot(furNormal,normalize(vec3(0.85,0.32,0.22))));
-       outgoingLight = outgoingLight * (0.78 + 0.23*light)
-         + vec3(0.028,0.023,0.030)*light*light
-         + rim*(vec3(0.064,0.055,0.061)*light + vec3(0.019,0.021,0.032)*coolBounce);
+      `vec3 coatNormal = normalize(normal);
+       float sky = smoothstep(-0.35, 0.86, dot(coatNormal, normalize(vec3(-0.43, 0.84, 0.34))));
+       float grazing = 1.0 - smoothstep(0.03, 0.38, abs(dot(coatNormal, normalize(vViewPosition))));
+       outgoingLight = diffuseColor.rgb * mix(0.66, 1.40, sky)
+         + vec3(0.0058, 0.0063, 0.0077) * sky
+         + vec3(0.021, 0.019, 0.021) * grazing * sky;
        #include <opaque_fragment>`
     );
   }
   function innerEar(fur, tint, dark) {
     const mat = fur.clone();
     mat.onBeforeCompile = (shader) => {
-      if (dark) velvetCoat(shader);
+      coatLight(shader);
       shader.uniforms.earTint = { value: new T.Color(tint) };
       shader.vertexShader = 'varying vec3 earPoint;\n' + shader.vertexShader.replace(
         '#include <begin_vertex>', '#include <begin_vertex>\nearPoint=position;'
@@ -459,9 +502,13 @@
          float height = (earPoint.y - 0.33) / 0.34;
          float width = 0.215 * (1.0 - 0.72*clamp(height,0.0,1.0));
          vec2 shape = vec2((earPoint.x - 0.018*sign(earPoint.x)*height)/width, (height-0.34)/0.85);
-         float inside = (1.0-smoothstep(0.69,1.06,length(shape)))*smoothstep(0.05,0.14,earPoint.z);
+         float inside = (1.0-smoothstep(0.69,1.06,length(shape)))*smoothstep(0.015,0.075,earPoint.z);
          float bowl = 0.54 + 0.37 * smoothstep(-0.43,0.85,shape.y) + 0.13 * smoothstep(0.50,0.93,length(shape));
-         diffuseColor.rgb = mix(diffuseColor.rgb,earTint*bowl,inside*.85);`
+         float fold = exp(-9.0*dot(shape-vec2(0.0,-0.26),shape-vec2(0.0,-0.26)));
+         diffuseColor.rgb = mix(diffuseColor.rgb,earTint*bowl*(1.0-.54*fold),inside*.79);
+         float fringe = 0.5+0.5*sin(28.0*shape.x+4.0*sin(3.0*shape.y)+5.0*shape.y);
+         float lowerEdge = (1.0-smoothstep(.30,.82,abs(shape.y+.39)))*smoothstep(.32,.82,abs(shape.x));
+         diffuseColor.rgb += vec3(.055,.042,.033)*inside*lowerEdge*pow(fringe,5.0);`
       );
     };
     mat.customProgramCacheKey = () => 'ear:' + dark;
@@ -470,7 +517,7 @@
   function forelegCoat(fur, shoulderTint, toeTint, side, dark) {
     const mat = fur.clone();
     mat.onBeforeCompile = (shader) => {
-      if (dark) velvetCoat(shader);
+      coatLight(shader);
       shader.uniforms.shoulderTint = { value: shoulderTint };
       shader.uniforms.toeTint = { value: toeTint };
       shader.uniforms.sideSign = { value: side };
@@ -482,7 +529,7 @@
         shader.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
           float u = coatPoint.x, across = coatPoint.y, up = coatPoint.z;
           diffuseColor.rgb = mix(shoulderTint,diffuseColor.rgb,smoothstep(.07,.38,u));
-          float sock = smoothstep(.88,1.01,u-.025*up);
+          float sock = smoothstep(.83,.95,u-.028*up-.013*across);
           diffuseColor.rgb = mix(diffuseColor.rgb,toeTint,sock*.65);
           float crease = (1.-smoothstep(.024,.11,abs(abs(across)-.34))) *
              smoothstep(.82,.90,u) * (1.-smoothstep(.94,.985,u)) * smoothstep(.32,.81,up);
@@ -495,7 +542,7 @@
       if (dark) shader.fragmentShader = shader.fragmentShader.replace('#include <opaque_fragment>', `
           float facing = abs(dot(normalize(normal),normalize(vViewPosition)));
           float inside = smoothstep(-.5,.75,-normal.x*sideSign);
-          float glint = (1.-smoothstep(.08,.47,facing))*(.09+.32*inside);
+          float glint = (1.-smoothstep(.05,.44,facing))*(.032+.150*inside);
           float along = smoothstep(.18,.41,coatPoint.x)*(1.-smoothstep(.84,1.,coatPoint.x));
           float darkFur = 1.-smoothstep(.07,.25,dot(diffuseColor.rgb,vec3(.213,.715,.072)));
           outgoingLight += vec3(.54,.45,.40)*glint*along*darkFur;
@@ -514,11 +561,11 @@
           ? new T.MeshLambertMaterial({ color: tint, side: T.DoubleSide })
           : color(tint);
     }
-    if (!long) mats.fur.onBeforeCompile = velvetCoat;
-    const earCoat = innerEar(mats.fur, long ? '#b5796d' : '#635157', !long);
-    mats.pupil = color('#17151b');
-    mats.whisk = color(long ? '#e1c7ab' : '#a29798');
-    const noseTint = new T.MeshLambertMaterial({ color: long ? '#99675f' : '#997478' });
+    mats.fur.onBeforeCompile = coatLight;
+    mats.shade.onBeforeCompile = coatLight;
+    const earCoat = innerEar(mats.fur, long ? '#ad7c68' : '#58434a', !long);
+    mats.whisk = color(long ? '#dbc0a5' : '#b2a69e');
+    const noseTint = new T.MeshLambertMaterial({color: long ? '#925e53' : '#60494c'});
     mats.sole = color(long ? '#f4d3af' : '#f1ede2');
     const root = group(parent),
       trunk = group(root),
@@ -553,10 +600,29 @@
     const ribs = ribSections(body, sideShape, 48);
     trunk.remove(sideShape);
     sideShape.geometry.dispose();
+    if (!long) {
+      body.material = mats.fur.clone();
+      body.material.onBeforeCompile = (shader) => {
+        coatLight(shader);
+        shader.vertexShader = 'varying vec3 chestPoint;\n' + shader.vertexShader.replace(
+          '#include <begin_vertex>','#include <begin_vertex>\nchestPoint=position;'
+        );
+        shader.fragmentShader = 'varying vec3 chestPoint;\n' + shader.fragmentShader.replace(
+          '#include <color_fragment>',`#include <color_fragment>
+           float x = chestPoint.x+.045;
+           float y = (chestPoint.y-1.85)/.67;
+           float breast = exp(-x*x*2.9-y*y)*smoothstep(.25,.76,chestPoint.z);
+           float fur = 19.0*atan(x,chestPoint.y+0.2) + 8.0*x + 2.0*sin(6.0*x+2.0*chestPoint.y);
+           diffuseColor.rgb += vec3(.013,.012,.014)*breast*(1.0+.14*sin(fur));`
+        );
+      };
+      body.material.customProgramCacheKey = () => 'ink-chest';
+    }
     if (long) {
       // Use the resting body coordinates so the three tufts of the bib follow the same morph as the shoulders.
       body.material = mats.fur.clone();
       body.material.onBeforeCompile = (shader) => {
+        coatLight(shader);
         shader.uniforms.bibTint = { value: mats.light.color };
         shader.vertexShader =
           'varying vec3 coatPoint;\n' +
@@ -581,23 +647,47 @@
     }
     // The forehead, jowls and tucked chin share a continuous egg-shaped surface.
     const faceCoat = mats.fur.clone();
+    // Each eye lives on the curved face. The gaze stays in head coordinates
+    // when the kitten turns, and blinking closes the upper lid over the iris.
+    const eyes = [-1, 1].map(() => ({
+      pupil: new T.Vector4(0, 0, 0.47, 0.89),
+      lid: new T.Vector2(1, 0),
+    }));
     faceCoat.onBeforeCompile = (shader) => {
-      if (!long) velvetCoat(shader);
+      coatLight(shader);
       shader.uniforms.tabbyStripe = { value: mats.stripe.color };
-      shader.uniforms.muzzleTint = { value: long ? mats.light.color : mats.fur.color.clone().lerp(new T.Color('#715960'), 0.30) };
-      shader.uniforms.cheekTint = { value: new T.Color(long ? '#cc8a76' : '#654c57') };
+      shader.uniforms.muzzleTint = { value: long ? mats.light.color : mats.fur.color.clone().lerp(new T.Color('#695b58'), 0.28) };
+      shader.uniforms.cheekTint = { value: new T.Color(long ? '#cc8a76' : '#493d42') };
       shader.vertexShader = 'varying vec3 facePoint;\n' + shader.vertexShader.replace(
         '#include <begin_vertex>', '#include <begin_vertex>\nfacePoint=position;'
       );
       shader.fragmentShader = 'varying vec3 facePoint; uniform vec3 cheekTint; uniform vec3 muzzleTint, tabbyStripe;\n' + shader.fragmentShader.replace(
         '#include <color_fragment>',
         `#include <color_fragment>
+         // Fine directional variations follow the cheeks rather than screen-space pixels.
+         vec2 nap = vec2(abs(facePoint.x),facePoint.y);
+         float along = nap.x * 0.48 + nap.y + 0.30*nap.x*nap.x;
+         float phase = 168.0*along + 2.1*sin(nap.x*21.0+along*11.0) + sin(nap.x*41.0);
+         float grain = sin(phase)*(1.0-smoothstep(.55,2.6,fwidth(phase)));
+         float sidePlane = smoothstep(.25,.74,nap.x) * smoothstep(-.79,-.57,nap.y);
+         diffuseColor.rgb *= 1.0 + .12*grain*sidePlane;
          vec2 cheek = (vec2(abs(facePoint.x),facePoint.y)-vec2(.69,-.22))/vec2(.29,.14);
          float warmth = (1.0-smoothstep(0.05,1.0,dot(cheek,cheek)))*smoothstep(.32,.68,facePoint.z);
          diffuseColor.rgb=mix(diffuseColor.rgb,cheekTint,0.24*warmth);
          vec2 pad = (vec2(abs(facePoint.x),facePoint.y) - vec2(.158,-.255)) / vec2(.217,.142);
          float mask = (1.-smoothstep(.51,1.21,length(pad))) * smoothstep(.63,.80,facePoint.z);
          diffuseColor.rgb=mix(diffuseColor.rgb,muzzleTint,mask*.92);
+         vec2 browPoint = (vec2(abs(facePoint.x),facePoint.y)-vec2(.442,.367))/vec2(.226,.075);
+         vec2 chinPoint = (facePoint.xy-vec2(0.0,-.46))/vec2(.26,.112);
+         float browPlane = exp(-dot(browPoint,browPoint))*smoothstep(.40,.62,facePoint.z);
+         vec2 bridgePoint = (facePoint.xy-vec2(0.0,-.028))/vec2(.096,.220);
+         float bridge = exp(-dot(bridgePoint,bridgePoint))*smoothstep(.66,.78,facePoint.z);
+         diffuseColor.rgb += vec3(.013,.011,.010)*bridge;
+         float chin = exp(-dot(chinPoint,chinPoint))*smoothstep(.48,.68,facePoint.z);
+         diffuseColor.rgb = mix(diffuseColor.rgb,muzzleTint,.42*browPlane+.51*chin);
+         vec2 holes = (vec2(abs(facePoint.x),facePoint.y)-vec2(.135,-.26))/vec2(.265,.12);
+         vec2 follicle = fract(holes*vec2(2.8,1.42)+vec2(.28*floor(holes.y*1.42),0.0))-.5;
+         diffuseColor.rgb *= 1.0-.19*mask*(1.0-smoothstep(.03,.16,length(follicle)));
          ${long ? `float ax = abs(facePoint.x), y = facePoint.y;
          float brow = smoothstep(.26,.41,y)*(1.-smoothstep(.52,.67,y));
          float centerStroke = (ax-(.13+.13*(y-.34)))/.043;
@@ -609,20 +699,64 @@
          float ruff = exp(-dot(ruffPoint,ruffPoint));
          diffuseColor.rgb=mix(diffuseColor.rgb,muzzleTint,.43*ruff*smoothstep(.25,.53,facePoint.z));` : ''}`
       );
+      shader.uniforms.eyeTint = { value: mats.eye.color };
+      shader.uniforms.leftPupil = { value: eyes[0].pupil };
+      shader.uniforms.rightPupil = { value: eyes[1].pupil };
+      shader.uniforms.leftLid = { value: eyes[0].lid };
+      shader.uniforms.rightLid = { value: eyes[1].lid };
+      shader.fragmentShader = 'uniform vec3 eyeTint; uniform vec4 leftPupil, rightPupil; uniform vec2 leftLid, rightLid;\n' +
+        shader.fragmentShader.replace('#include <opaque_fragment>', `
+          vec4 pupil = facePoint.x < 0.0 ? leftPupil : rightPupil;
+          vec2 lid = facePoint.x < 0.0 ? leftLid : rightLid;
+          vec2 eye = (facePoint.xy - vec2(sign(facePoint.x)*0.392, 0.116)) / vec2(0.281, 0.229);
+          eye.y -= eye.x * lid.y;
+          float boundary = length(eye * vec2(1.0, 1.0+0.10*eye.x*eye.x)) - 1.0;
+          float lower = -0.96 + 0.57 * min(eye.x*eye.x, 1.0);
+          float upper = mix(lower, 1.22, smoothstep(0.04, 1.03, lid.x));
+          float eyeEdge = max(boundary, eye.y - upper);
+          float aa = clamp(fwidth(eyeEdge), 0.012, 0.16);
+          float eyeMask = (1.0-smoothstep(-aa, aa, eyeEdge)) * smoothstep(0.36,0.58,facePoint.z)
+            * smoothstep(0.055,0.20,lid.x);
+          vec2 q = eye - pupil.xy;
+          float pupilEdge = length(q / pupil.zw) - 1.0;
+          float pupilAA = clamp(fwidth(pupilEdge), 0.02, 0.21);
+          float rimDist = abs(boundary-.018);
+          float socketRim = (1.0-smoothstep(.016,.069+aa,rimDist))*smoothstep(-.02,.64,-eye.y);
+          outgoingLight += vec3(.024,.018,.017)*socketRim*smoothstep(.35,.62,facePoint.z)*smoothstep(.30,.88,lid.x);
+          float irisRadius = length(q);
+          float angle = atan(q.y,q.x);
+          float fibers = sin(31.0*angle+3.0*irisRadius) * cos(9.0*angle-4.0*irisRadius);
+          float detail = 1.0-smoothstep(.63,2.65,31.0*length(fwidth(q))/max(.3,irisRadius));
+          float eyelidShadow = smoothstep(-.48,.89,eye.y);
+          vec3 iris = eyeTint * (1.18 - .64*eyelidShadow + .085*fibers*detail);
+          iris = mix(iris*.41,iris,1.0-smoothstep(.83,1.02,length(eye)));
+          iris = mix(iris,iris*vec3(1.07,.76,.57),.55*(1.0-smoothstep(.50,.83,irisRadius)));
+          vec3 eyePaint = mix(mix(vec3(.006,.005,.007),vec3(.022,.021,.022),.68*(1.0-smoothstep(-.78,.47,eye.y))), iris, smoothstep(-pupilAA,pupilAA,pupilEdge));
+          // A single small window reflection, shared by both eyes.
+          float reflection = length((q-vec2(-0.19,0.43))*vec2(1.0,0.89)) - 0.112;
+          float lightAA = clamp(fwidth(reflection), 0.012, 0.10);
+          eyePaint = mix(eyePaint,vec3(0.98,0.94,0.80),1.0-smoothstep(-lightAA,lightAA,reflection));
+          float foldDist = abs(eye.y - (0.08 - .27*eye.x*eye.x));
+          float closedArc = (1.0-smoothstep(.022,.080+aa,foldDist)) *
+            (1.0-smoothstep(.60,.96,abs(eye.x)))*smoothstep(.36,.58,facePoint.z);
+          outgoingLight = mix(outgoingLight, outgoingLight*.40, closedArc*(1.0-smoothstep(.09,.45,lid.x)));
+          outgoingLight = mix(outgoingLight, eyePaint, eyeMask);
+          #include <opaque_fragment>`
+        );
     };
-    // The two coats share anatomy; only the short black coat gets the velvet response.
+    // Colour markings are part of the coat, including through head turns.
     faceCoat.customProgramCacheKey = () => 'cheeks:' + id;
     kittenHead(head, faceCoat, long);
-    head.scale.set(long ? 1.16 : 1.155, 1.20, 1.16);
+    cheekFur(head, mats.fur.color, long);
+    head.scale.set(long ? 1.14 : 1.115, long ? 1.22 : 1.25, 1.16);
     const ears = [],
-      eyes = [],
       whiskers = [],
       arms = [],
       hind = [];
     for (const side of [-1, 1]) {
       const ear = group(head);
       ear.position.set(side * (long ? 0.505 : 0.462), 0.315, -0.080);
-      skinSurface(
+      const pinna = skinSurface(
         ear,
         earCoat,
         [
@@ -637,6 +771,18 @@
         ],
         48
       );
+      // The inner pinna is a shallow bowl. Pull only the front surface back,
+      // leaving the rolled outer ear and the back silhouette in place.
+      const pinnaPos = pinna.geometry.attributes.position;
+      for (let v = 0; v < pinnaPos.count; v++) {
+        const y = pinnaPos.getY(v), x = pinnaPos.getX(v), z = pinnaPos.getZ(v);
+        if (z <= 0 || y < .16) continue;
+        const width = Math.max(.042,.285-.35*(y-.26));
+        const across = (x-side*.026)/width;
+        const hollow = Math.exp(-2.2*across*across-(((y-.46)/.23)**2));
+        pinnaPos.setZ(v,z-.124*hollow*T.MathUtils.smoothstep(z,.028,.13));
+      }
+      pinna.geometry.computeVertexNormals();
       if (long) {
         for (let j = 0; j < 2; j++) {
           const g = mesh(
@@ -650,60 +796,8 @@
           g.rotation.z = -side * (0.32 + j * 0.14);
         }
       }
-      ear.scale.set(long ? 0.99 : 0.95, long ? 1.04 : 1.01, 0.97);
+      ear.scale.set(long ? 1.01 : 1.03, long ? 1.08 : 1.13, 0.97);
       ears.push(ear);
-      const socket = group(head);
-      socket.position.set(side * 0.425, 0.130, faceDepth(0.425, 0.130, long) + 0.012);
-      socket.rotation.set(-0.14, side * 0.36, side * 0.065);
-      const lid = group(socket);
-      const paint = color(p.eye);
-      const gaze = { value: new T.Vector2() },
-        pupil = { value: new T.Vector2(0.34, 0.65) }, aperture = { value: 1 };
-      paint.onBeforeCompile = (shader) => {
-        shader.uniforms.pawGaze = gaze;
-        shader.uniforms.pawPupil = pupil;
-        shader.uniforms.aperture = aperture;
-        shader.uniforms.closedTint = { value: mats.fur.color };
-        shader.vertexShader =
-          'varying vec2 eyePoint;\n' +
-          shader.vertexShader.replace(
-            '#include <begin_vertex>',
-            '#include <begin_vertex>\neyePoint=position.xy;'
-          );
-        shader.fragmentShader =
-          'varying vec2 eyePoint; uniform vec2 pawGaze; uniform vec2 pawPupil; uniform float aperture; uniform vec3 closedTint;\n' +
-          shader.fragmentShader.replace(
-            '#include <color_fragment>',
-            `#include <color_fragment>
-          vec2 xy = eyePoint;
-          vec2 pt = xy-pawGaze;
-          float edge = length(xy);
-          float honey = smoothstep(-0.55,0.90,-xy.y);
-          vec3 irisColor = diffuseColor.rgb * mix(0.66,1.28,honey);
-          float innerRing = 1.0-smoothstep(0.76,1.08,length(pt/vec2(0.94,1.0)));
-          irisColor *= 0.77 + 0.23*innerRing;
-          float limbus = smoothstep(0.86,1.02,edge);
-          irisColor = mix(irisColor,irisColor*0.19,limbus);
-          float pupilEdge = length(pt/pawPupil);
-          vec3 pupilInk = mix(vec3(.006,.005,.008),vec3(.032,.022,.025),honey);
-          diffuseColor.rgb = mix(pupilInk,irisColor,smoothstep(0.96,1.025,pupilEdge));
-          vec2 gleam = xy - 0.30*pawGaze;
-          float window = 1.0-smoothstep(0.91,1.05,length((gleam-vec2(-.22,.30))/vec2(.148,.177)));
-          float pin = 1.0-smoothstep(.055,.087,length(gleam-vec2(.16,.51)));
-          float bounce = 1.0-smoothstep(.08,.16,length((gleam-vec2(.25,-.53))*vec2(.74,1.04)));
-          diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.96,.78,.49),bounce*.34);
-          diffuseColor.rgb=mix(diffuseColor.rgb,vec3(1.,.96,.87),max(window,pin*.75));
-          diffuseColor.rgb=mix(closedTint*.54,diffuseColor.rgb,smoothstep(.07,.25,aperture));`
-          );
-      };
-      const lens = globe.clone();
-      const iris = lens.attributes.position;
-      for (let v = 0; v < iris.count; v++) {
-        const x = iris.getX(v);
-        iris.setY(v, iris.getY(v) * (1 - 0.33 * x * x));
-      }
-      mesh(lid, lens, paint).scale.set(0.311, 0.276, 0.087);
-      eyes.push({ socket, lid, gaze, pupil, aperture });
       // Each strand starts on its own whisker pad, clears the cheek, then fans out.
       const fan = group(head);
       const hinge = V(side * 0.244, -0.242, faceDepth(0.244, -0.242, long));
@@ -722,6 +816,11 @@
         ];
         whisker(fan, mats.whisk, points.map((point) => point.sub(hinge).toArray()));
       }
+      const browRoot = V(side*.65,.30,faceDepth(.65,.30,long));
+      whisker(head,mats.whisk,[
+        browRoot.toArray(),[side*.72,.39,browRoot.z+.015],
+        [side*.86,.50,browRoot.z-.044],[side*.93,.57,browRoot.z-.13]
+      ], .0046);
       const sleeve = forelegCoat(mats.fur,
         long ? mats.light.color : mats.fur.color,
         long ? mats.light.color : new T.Color('#cebbba'), side, !long);
@@ -767,10 +866,8 @@
         'color',
         new T.Float32BufferAttribute(colors, 3)
       );
-      tail.mesh.material = new T.MeshLambertMaterial({
-        vertexColors: true,
-        side: T.DoubleSide,
-      });
+      tail.mesh.material = new T.MeshLambertMaterial({ vertexColors: true, side: T.DoubleSide });
+      tail.mesh.material.onBeforeCompile = coatLight;
     }
     const smile = group(head);
     const smileInk = color(long ? '#8a5d4b' : '#211b22');
@@ -812,7 +909,13 @@
       [0.032, 0.073, 0.034, 0, -0.009],
       [0.043, 0.027, 0.017, 0, -0.017]
     ], 32);
+    nose.scale.set(0.88, 0.82, 0.74);
     nose.position.set(0, -0.185, faceDepth(0, -0.185, long) + 0.021);
+    const nostril = color(long ? '#663f39' : '#352b32');
+    for (const side of [-1,1]) {
+      const slit = egg(nose,nostril,side*.053,.005,.035,.018,.006,.008);
+      slit.rotation.z = side*.32;
+    }
     stroke(smile, smileInk, [[0, -0.234, nose.position.z + 0.013],
       [0, -0.257, faceDepth(0, -0.257, long) + 0.014],
       [0, -0.273, faceDepth(0, -0.273, long) + 0.010]], 0.011);
@@ -1157,7 +1260,8 @@
       this.camera.aspect = a;
       this.camera.position.set(-0.14, 1.62 + dist * 0.407, 0.7 + dist * 0.913);
       this.camera.lookAt(-0.14, 1.62, 0.7);
-      this.camera.updateProjectionMatrix();
+      // Leave room for the upright ears, while keeping the keyboard in frame.
+      this.camera.setViewOffset(w, h, 0, -.044*h, w, h);
     }
     snapshot() {
       const surface = document.createElement('canvas');
@@ -1308,21 +1412,18 @@
           (1 - 0.89 * h) *
           (1 - 0.95 * n) *
           (1 - 0.96 * covered);
-        eye.lid.scale.y = Math.max(
+        eye.lid.x = Math.max(
           0.04,
           Math.min(blink, 1 - 0.94 * m.reliefBlink) * openness
         );
-        eye.aperture.value = eye.lid.scale.y;
-        eye.lid.rotation.z = s * (0.015 + 0.08 * d + 0.29 * heat);
-        eye.gaze.value.set(
+        eye.lid.y = s * (0.052 + 0.08 * d + 0.43 * heat);
+        eye.pupil.set(
           m.gaze[0] * (0.43 + 0.12 * sideways + 0.07 * slowLook) - s * 0.035,
-          -0.025 - 0.04 * typing + 0.18 * m.gaze[1]
-        );
-        eye.pupil.value.set(
+          -0.025 - 0.04 * typing + 0.18 * m.gaze[1],
           (0.54 + 0.18 * m.hunt + 0.055 * slowLook + 0.075 * m.lookup - 0.065 * sideways) *
             (1 - 0.22 * d) *
             (1 - 0.26 * heat),
-          0.83 + 0.045 * m.hunt
+          0.92 + 0.045 * m.hunt
         );
         const e = c.ears[i];
         e.rotation.z =

@@ -4,6 +4,22 @@ const { app, BrowserWindow } = require('electron');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const ref = require('../web/reference.js');
+function verifyEarFraming(pet) {
+  const { cat, camera } = pawReview.view;
+  const point = new THREE.Vector3();
+  for (const ear of cat.ears) {
+    ear.traverse((node) => {
+      if (!node.isMesh) return;
+      const positions = node.geometry.getAttribute('position');
+      for (let i = 0; i < positions.count; i++) {
+        point.fromBufferAttribute(positions, i).applyMatrix4(node.matrixWorld).project(camera);
+        if (point.y > 0.995 || Math.abs(point.x) > 0.995) {
+          throw new Error(pet + ' upright ear extends beyond the desktop frame');
+        }
+      }
+    });
+  }
+}
 // Runs inside the isolated renderer before a reference take. Read the deformed
 // sole and the moving key mesh so a change in either model can break the check.
 function verifyKeyContacts(pet) {
@@ -76,6 +92,9 @@ async function capture() {
             frame +
             ';i++)pawReview.frame(i/30);return {png:pawReview.snapshot(),state:pawReview.state()};})()'
         );
+        if (cue.pose === 'sit') {
+          await run('(' + verifyEarFraming.toString() + ')(' + JSON.stringify(pet) + ')');
+        }
         lastFrame = frame + 1;
         const file = pet + '-' + cue.pose + '.png';
         await fs.writeFile(
