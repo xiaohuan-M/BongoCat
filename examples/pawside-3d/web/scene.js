@@ -54,6 +54,23 @@
       mat
     );
   }
+  function whisker(head, mat, points) {
+    const path = new T.CatmullRomCurve3(points.map((p) => V(...p)));
+    const rings = 14, sides = 7;
+    const geom = new T.TubeGeometry(path, rings, .010, sides, false);
+    const pos = geom.attributes.position, center = V(0,0,0), point = V(0,0,0);
+    for (let j = 0; j <= rings; j++) {
+      const t = j / rings;
+      path.getPointAt(t, center);
+      const taper = 1 - .90*t*t;
+      for (let k = 0; k <= sides; k++) {
+        const i = j*(sides+1) + k;
+        point.fromBufferAttribute(pos,i).sub(center).multiplyScalar(taper).add(center);
+        pos.setXYZ(i,point.x,point.y,point.z);
+      }
+    }
+    return mesh(head,geom,mat);
+  }
   function slab(w, d, h, r) {
     const shape = new T.Shape(),
       x = w / 2,
@@ -124,14 +141,58 @@
     geo.computeVertexNormals();
     return mesh(parent, geo, mat);
   }
-  // End caps and changes in limb thickness follow the curve, including a flat planted paw.
-  class Limb {
-    constructor(parent, mat, radius, segments = 36) {
-      this.radius = radius;
+  // Sculpt the two cheek locks into the head surface. They stay joined to the
+  // skin as the head turns; the short coat gets only a few pixels of softness.
+  function sculptCheeks(head, long) {
+    const pos = head.geometry.attributes.position;
+    const lock = (y, tip, top) =>
+      T.MathUtils.smoothstep(y, tip-.085, tip) * (1-T.MathUtils.smoothstep(y, tip, top));
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), y = pos.getY(i);
+      const side = T.MathUtils.smoothstep(Math.abs(x), .73, 1.03);
+      const fringe = side * (lock(y,-.18,.14) + .76*lock(y,-.40,-.15));
+      pos.setXY(i, x + Math.sign(x)*fringe*(long ? .147 : .056), y-fringe*(long ? .077 : .030));
+    }
+    pos.needsUpdate = true;
+    head.geometry.computeVertexNormals();
+  }
+  // Cross sections come from the same two meshes that animate the seated torso.
+  // The elbow can fold behind the wrist, but must stay on the visible side of the ribs.
+  function ribSections(body, bent, sides) {
+    const straight = body.geometry.attributes.position;
+    const leaning = bent.geometry.attributes.position;
+    const rings = [];
+    for (let i = 0; i + sides <= straight.count; i += sides) {
+      const section = (p) => {
+        const right = p.getX(i), left = p.getX(i + sides/2);
+        const front = p.getZ(i + sides/4), back = p.getZ(i + sides*3/4);
+        return [(right+left)/2, (front+back)/2, (right-left)/2, (front-back)/2];
+      };
+      rings.push({ y: straight.getY(i), rest: section(straight), bent: section(leaning) });
+    }
+    return rings;
+  }
+  function frontOfRibs(body, rings, point) {
+    const matrix = body.parent.matrix.elements;
+    const y = (point.y - matrix[13]) / matrix[5];
+    const x = (point.x - matrix[4]*y) / matrix[0];
+    const bend = body.morphTargetInfluences[0];
+    let row = 1;
+    while (row + 1 < rings.length && rings[row].y < y) row++;
+    const lo = rings[row-1], hi = rings[row];
+    const t = clamp((y - lo.y) / (hi.y-lo.y));
+    const at = (i) => mix(mix(lo.rest[i],lo.bent[i],bend),mix(hi.rest[i],hi.bent[i],bend),t);
+    const unitX = (x-at(0))/at(2);
+    if (Math.abs(unitX) >= 1) return -Infinity;
+    return at(1) + at(3)*Math.sqrt(1-unitX*unitX) + matrix[6]*y;
+  }
+  // One indexed grid per moving surface. Its topology and storage survive each pose.
+  class Sweep {
+    constructor(parent, mat, segments, sides, controls) {
       this.rows = segments;
-      this.cols = 20;
+      this.cols = sides;
       this.curve = new T.CatmullRomCurve3(
-        [V(0, 0, 0), V(0, 0, 0), V(0, 0, 0), V(0, 0, 0), V(0, 0, 0)],
+        Array.from({ length: controls }, () => V(0, 0, 0)),
         false,
         'catmullrom',
         0.5
@@ -161,6 +222,12 @@
       this.next = V(0, 0, 0);
       this.axis = V(0, 0, 0);
       this.cross = V(0, 0, 0);
+    }
+  }
+  class Limb extends Sweep {
+    constructor(parent, mat, radius, segments = 36) {
+      super(parent, mat, segments, 20, 5);
+      this.radius = radius;
     }
     pose(points, width = 1) {
       this.curve.points.forEach((p, i) => p.copy(points[i]));
@@ -204,6 +271,95 @@
       this.normal.needsUpdate = true;
     }
   }
+  // Shoulder, elbow, carpus and toes form one surface. The last fifth of the
+  // curve runs along the paw instead of down the leg, so the foot can plant flat.
+  class Foreleg extends Sweep {
+    constructor(parent, mat) {
+      super(parent, mat, 55, 32, 6);
+      this.widthAxis = V(1, 0, 0);
+      this.aim = V(0, 0, 1);
+      this.crossSection = [];
+      this.circle = [];
+      const coatCoords = [];
+      const outline = new T.SplineCurve([
+        new T.Vector2(.12,.13), new T.Vector2(.24,.24), new T.Vector2(.276,.265),
+        new T.Vector2(.246,.242), new T.Vector2(.205,.204), new T.Vector2(.173,.17),
+        new T.Vector2(.148,.142), new T.Vector2(.165,.137), new T.Vector2(.208,.133),
+        new T.Vector2(.184,.112), new T.Vector2(0,0)
+      ]);
+      for (let k = 0; k < this.cols; k++) {
+        const q = 2 * Math.PI * k / this.cols;
+        this.circle.push([Math.cos(q), Math.sin(q)]);
+      }
+      for (let j = 0; j <= this.rows; j++) {
+        const t = j / this.rows;
+        const radii = outline.getPoint(t);
+        // An elliptical toe dome has a vertical tangent at its very front.
+        if (t >= .8) {
+          const dome = Math.sqrt(Math.max(0, 1 - ((t - .8) / .2) ** 2));
+          radii.set(.208 * dome, .133 * dome);
+        }
+        this.crossSection.push(radii);
+        for (const [x, y] of this.circle) coatCoords.push(t, x, y);
+      }
+      this.mesh.geometry.setAttribute('pawPoint', new T.Float32BufferAttribute(coatCoords, 3));
+    }
+    place(shoulder, palm, side, reach, cover, squash, body, ribs) {
+      const [root, upper, elbow, wrist, pad, toe] = this.curve.points;
+      pad.copy(palm);
+      const lift = clamp((palm.y - .45) / .75);
+      root.copy(shoulder);
+      root.z -= .25;
+      upper.copy(shoulder);
+      upper.x += side * .058;
+      upper.y -= .19;
+      upper.z += .11;
+      elbow.lerpVectors(upper, palm, .46);
+      // The humerus folds back along the ribs; the wrist stays over the paw.
+      elbow.x += side * (.12 + .21 * lift) + .22 * reach;
+      elbow.y -= .14 + .22 * lift;
+      elbow.z -= .23 + .17 * lift;
+      elbow.z = Math.max(elbow.z, frontOfRibs(body, ribs, elbow) + .065);
+      this.aim.set(
+        clamp((palm.x - shoulder.x) * .37, -.60, .60) * (1 - cover) - side*.12*cover,
+        -.10 - .21 * reach + .13 * lift + 1.12 * cover,
+        1 - .82 * cover
+      ).normalize();
+      wrist.copy(palm).addScaledVector(this.aim, -.205);
+      wrist.y += .16 - .09 * cover;
+      wrist.z -= .047 * lift;
+      wrist.z = Math.max(wrist.z, frontOfRibs(body, ribs, wrist) + .01);
+      toe.copy(palm).addScaledVector(this.aim, .235);
+      // Transport width backwards from the toes. Both paws keep their soles
+      // facing the desk at contact and turn them towards the viewer at the eyes.
+      this.widthAxis.set(this.aim.z, 0, -this.aim.x).normalize();
+      for (let j = this.rows; j >= 0; j--) {
+        const t = j / this.rows;
+        this.curve.getPoint(t, this.center);
+        this.curve.getTangent(t, this.next);
+        this.widthAxis.addScaledVector(this.next, -this.widthAxis.dot(this.next)).normalize();
+        this.cross.crossVectors(this.next, this.widthAxis);
+        const shape = this.crossSection[j];
+        const pressure = squash * T.MathUtils.smoothstep(t, .62, .8);
+        const width = shape.x * (1 + .085 * pressure + .12 * cover * T.MathUtils.smoothstep(t, .62, .8));
+        const height = shape.y * (1 - .085 * pressure);
+        for (let k = 0; k < this.cols; k++) {
+          const [cos, sin] = this.circle[k];
+          const a = cos * width, b = sin * height;
+          this.pos.setXYZ(j * this.cols + k,
+            this.center.x + a*this.widthAxis.x + b*this.cross.x,
+            this.center.y + a*this.widthAxis.y + b*this.cross.y,
+            this.center.z + a*this.widthAxis.z + b*this.cross.z);
+        }
+      }
+      this.pos.needsUpdate = true;
+      this.mesh.geometry.computeVertexNormals();
+      // The coincident vertices on the tip share the tangent normal.
+      for (let k = 0; k < this.cols; k++)
+        this.normal.setXYZ(this.rows * this.cols + k, this.aim.x, this.aim.y, this.aim.z);
+      this.normal.needsUpdate = true;
+    }
+  }
   function faceDepth(x, y) {
     return (
       0.82 * Math.sqrt(Math.max(0.06, 1 - (x / 1.075) ** 2 - (y / 0.86) ** 2))
@@ -233,9 +389,10 @@
        #include <opaque_fragment>`
     );
   }
-  function innerEar(fur, tint) {
+  function innerEar(fur, tint, dark) {
     const mat = fur.clone();
     mat.onBeforeCompile = (shader) => {
+      if (dark) velvetCoat(shader);
       shader.uniforms.earTint = { value: new T.Color(tint) };
       shader.vertexShader = 'varying vec3 earPoint;\n' + shader.vertexShader.replace(
         '#include <begin_vertex>', '#include <begin_vertex>\nearPoint=position;'
@@ -250,55 +407,44 @@
          diffuseColor.rgb = mix(diffuseColor.rgb,earTint,inside*(0.64 + 0.23*clamp(height,0.0,1.0)));`
       );
     };
+    mat.customProgramCacheKey = () => 'ear:' + dark;
     return mat;
   }
-  function inkForepaw(fur, side) {
-    const material = fur.clone();
-    // The paw cap is a sphere. Only the foreleg needs a fade into the shoulder.
-    material.defaultAttributeValues = { pawContrast: [1] };
-    material.onBeforeCompile = (shader) => {
-      shader.uniforms.pawFill = { value: new T.Color('#d5c7b9') };
-      shader.uniforms.pawSide = { value: side };
-      shader.vertexShader =
-        'attribute float pawContrast; varying float pawWeight;\n' +
-        shader.vertexShader.replace(
-          '#include <begin_vertex>',
-          '#include <begin_vertex>\npawWeight = pawContrast;'
-        );
-      shader.fragmentShader =
-        'uniform vec3 pawFill; uniform float pawSide; varying float pawWeight;\n' +
-        shader.fragmentShader.replace(
-          '#include <opaque_fragment>',
-          `float facing = abs(dot(normalize(normal), normalize(vViewPosition)));
-           float rim = 1.0 - smoothstep(0.12, 0.52, facing);
-           float innerArc = smoothstep(-0.35, 0.55, -normal.x * pawSide);
-           float crest = smoothstep(0.03, 0.19, facing) * (1.0 - smoothstep(0.24, 0.45, facing));
-           float glancingLight = rim * (0.15 + 0.47 * innerArc) + 0.26 * crest * innerArc;
-           float darkCoat = 1.0 - smoothstep(0.05, 0.25, dot(diffuse, vec3(0.2126, 0.7152, 0.0722)));
-           outgoingLight = mix(outgoingLight, pawFill, pawWeight * darkCoat * (0.016 + glancingLight));
-           #include <opaque_fragment>`
-        );
-    };
-    return material;
-  }
-  function mittenMaterial(fur, toes) {
+  function forelegCoat(fur, shoulderTint, toeTint, side, dark) {
     const mat = fur.clone();
-    const light = fur.onBeforeCompile;
-    mat.defaultAttributeValues = { pawContrast: [1] };
-    mat.onBeforeCompile = (shader, renderer) => {
-      light.call(mat, shader, renderer);
-      shader.uniforms.toeTint = { value: toes };
-      shader.vertexShader = 'varying vec3 mittenPoint;\n' + shader.vertexShader.replace(
-        '#include <begin_vertex>', '#include <begin_vertex>\nmittenPoint=position;'
-      );
-      shader.fragmentShader = 'varying vec3 mittenPoint; uniform vec3 toeTint;\n' + shader.fragmentShader.replace(
-        '#include <color_fragment>',
-        `#include <color_fragment>
-         float toe = smoothstep(0.32,0.65,0.69*mittenPoint.z - 0.65*mittenPoint.y);
-         diffuseColor.rgb = mix(diffuseColor.rgb,toeTint,toe);`
-      );
+    mat.onBeforeCompile = (shader) => {
+      if (dark) velvetCoat(shader);
+      shader.uniforms.shoulderTint = { value: shoulderTint };
+      shader.uniforms.toeTint = { value: toeTint };
+      shader.uniforms.sideSign = { value: side };
+      shader.vertexShader = 'attribute vec3 pawPoint; varying vec3 coatPoint;\n' +
+        shader.vertexShader.replace('#include <begin_vertex>',
+          '#include <begin_vertex>\ncoatPoint=pawPoint;');
+      shader.fragmentShader =
+        'varying vec3 coatPoint; uniform vec3 shoulderTint, toeTint; uniform float sideSign;\n' +
+        shader.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
+          float u = coatPoint.x, across = coatPoint.y, up = coatPoint.z;
+          diffuseColor.rgb = mix(shoulderTint,diffuseColor.rgb,smoothstep(.07,.38,u));
+          float sock = smoothstep(.88,1.01,u-.025*up);
+          diffuseColor.rgb = mix(diffuseColor.rgb,toeTint,sock*.65);
+          float crease = (1.-smoothstep(.024,.11,abs(abs(across)-.34))) *
+             smoothstep(.82,.90,u) * (1.-smoothstep(.94,.985,u)) * smoothstep(.32,.81,up);
+          diffuseColor.rgb *= 1.-.23*crease;
+          float bean = length(vec2((u-.794)/.071,across/.49));
+          float digit = length(vec2((u-.906)/.035,(abs(across)-.52)/.21));
+          float middle = length(vec2((u-.927)/.034,across/.20));
+          float pad = (1.-smoothstep(.79,1.05,min(bean,min(digit,middle))))*(1.-smoothstep(-.80,-.53,up));
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.45,.225,.216), .85*pad);`);
+      if (dark) shader.fragmentShader = shader.fragmentShader.replace('#include <opaque_fragment>', `
+          float facing = abs(dot(normalize(normal),normalize(vViewPosition)));
+          float inside = smoothstep(-.5,.75,-normal.x*sideSign);
+          float glint = (1.-smoothstep(.08,.47,facing))*(.09+.32*inside);
+          float along = smoothstep(.18,.41,coatPoint.x)*(1.-smoothstep(.84,1.,coatPoint.x));
+          float darkFur = 1.-smoothstep(.07,.25,dot(diffuseColor.rgb,vec3(.213,.715,.072)));
+          outgoingLight += vec3(.54,.45,.40)*glint*along*darkFur;
+          #include <opaque_fragment>`);
     };
-    mat.customProgramCacheKey = () => 'mitten:' + fur.customProgramCacheKey();
+    mat.customProgramCacheKey = () => 'foreleg:' + dark;
     return mat;
   }
   function makeCat(parent, id, overrides = {}) {
@@ -312,7 +458,7 @@
           : color(tint);
     }
     if (!long) mats.fur.onBeforeCompile = velvetCoat;
-    const earCoat = innerEar(mats.fur, long ? '#cc8c75' : '#806569');
+    const earCoat = innerEar(mats.fur, long ? '#cc8c75' : '#806569', !long);
     mats.pupil = color('#17151b');
     mats.whisk = color(long ? '#e7c39d' : '#998a8a');
     const muzzleTint = new T.MeshLambertMaterial({ color: long ? p.light : mats.fur.color.clone().lerp(new T.Color('#5d5059'), 0.38) });
@@ -348,6 +494,7 @@
       sideShape.geometry.attributes.normal.clone(),
     ];
     body.updateMorphTargets();
+    const ribs = ribSections(body, sideShape, 48);
     trunk.remove(sideShape);
     sideShape.geometry.dispose();
     if (long) {
@@ -394,7 +541,7 @@
     };
     // The two coats share anatomy; only the short black coat gets the velvet response.
     faceCoat.customProgramCacheKey = () => 'cheeks:' + id;
-    skinSurface(head, faceCoat, [
+    const face = skinSurface(head, faceCoat, [
       [-0.81, 0.018, 0.025, 0, 0.11],
       [-0.73, 0.44, 0.40, 0, 0.10],
       [-0.57, 0.78, 0.62, 0, 0.075],
@@ -406,18 +553,13 @@
       [0.82, 0.37, 0.29, 0, -0.035],
       [0.875, 0.025, 0.024, 0, -0.035],
     ]);
+    sculptCheeks(face, long);
     head.scale.set(long ? 1.22 : 1.27, 1.19, 1.13);
     const ears = [],
       eyes = [],
-      feet = [],
       arms = [],
-      hind = [],
-      tufts = [];
-    const bibSleeve = long
-      ? new T.MeshLambertMaterial({ vertexColors: true, side: T.DoubleSide })
-      : null;
+      hind = [];
     for (const side of [-1, 1]) {
-      const sleeve = bibSleeve || inkForepaw(mats.fur, side);
       const ear = group(head);
       ear.position.set(side * (long ? 0.62 : 0.59), 0.39, -0.08);
       skinSurface(
@@ -446,18 +588,6 @@
             -0.005
           );
           g.rotation.z = -side * (0.32 + j * 0.14);
-        }
-        for (let j = 0; j < 2; j++) {
-          const tuft = mesh(
-            head,
-            new T.ConeGeometry(0.15 - j * 0.02, 0.34 - j * 0.035, 16),
-            mats.fur,
-            side * 0.88,
-            -0.19 - j * 0.11,
-            0.06
-          );
-          tuft.rotation.z = side * (-1.85 - j * 0.22);
-          tufts.push(tuft);
         }
         marking(head, mats.light, [
           [side * 0.45, -0.23],
@@ -489,10 +619,12 @@
       const lid = group(socket);
       const paint = color(p.eye);
       const gaze = { value: new T.Vector2() },
-        pupil = { value: new T.Vector2(0.34, 0.65) };
+        pupil = { value: new T.Vector2(0.34, 0.65) }, aperture = { value: 1 };
       paint.onBeforeCompile = (shader) => {
         shader.uniforms.pawGaze = gaze;
         shader.uniforms.pawPupil = pupil;
+        shader.uniforms.aperture = aperture;
+        shader.uniforms.closedTint = { value: mats.fur.color };
         shader.vertexShader =
           'varying vec2 eyePoint;\n' +
           shader.vertexShader.replace(
@@ -500,7 +632,7 @@
             '#include <begin_vertex>\neyePoint=position.xy;'
           );
         shader.fragmentShader =
-          'varying vec2 eyePoint; uniform vec2 pawGaze; uniform vec2 pawPupil;\n' +
+          'varying vec2 eyePoint; uniform vec2 pawGaze; uniform vec2 pawPupil; uniform float aperture; uniform vec3 closedTint;\n' +
           shader.fragmentShader.replace(
             '#include <color_fragment>',
             `#include <color_fragment>
@@ -521,51 +653,35 @@
           float pin = 1.0-smoothstep(.055,.087,length(gleam-vec2(.16,.51)));
           float bounce = 1.0-smoothstep(.08,.16,length((gleam-vec2(.25,-.53))*vec2(.74,1.04)));
           diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.96,.78,.49),bounce*.34);
-          diffuseColor.rgb=mix(diffuseColor.rgb,vec3(1.,.96,.83),max(window,pin*.86));`
+          diffuseColor.rgb=mix(diffuseColor.rgb,vec3(1.,.96,.83),max(window,pin*.86));
+          diffuseColor.rgb=mix(closedTint*.54,diffuseColor.rgb,smoothstep(.07,.25,aperture));`
           );
       };
       egg(lid, paint, 0, 0, 0, 0.315, 0.310, 0.100);
-      eyes.push({ socket, lid, gaze, pupil });
+      eyes.push({ socket, lid, gaze, pupil, aperture });
       for (let j = 0; j < 2; j++)
-        stroke(
+        whisker(
           head,
           mats.whisk,
           [
             [side * 0.53, -0.20 - j * 0.043, 0.719],
             [side * 0.82, -0.19 - j * 0.075, 0.565],
-            [side * (1.045 + 0.036 * j), -0.16 - j * 0.13, 0.444],
-          ],
-          0.008
+            [side * (1.10 + 0.025 * j), -0.13 - j * 0.135, 0.44],
+          ]
         );
-      const sole = group(root);
-      const toeColor = long ? mats.light.color : new T.Color('#dbccc1');
-      const mitten = mittenMaterial(mats.fur, toeColor);
-      egg(sole, mitten, 0, 0.06, 0.085, 0.216, 0.160, 0.246);
-      feet.push(sole);
-      const radius = (t) => 0.29 - 0.116 * t + 0.042 * Math.sin(Math.PI * t);
-      const arm = new Limb(root, sleeve, radius);
-      if (long) {
-        // Carry the bib over the shoulder so the root of the leg has no cut edge.
-        const tint = new T.Color();
-        const colors = [];
-        for (let row = 0; row <= arm.rows; row++) {
-          const t = T.MathUtils.smoothstep(row / arm.rows, 0.04, 0.39);
-          tint.copy(mats.light.color).lerp(mats.fur.color, t);
-          for (let k = 0; k < arm.cols; k++) colors.push(tint.r, tint.g, tint.b);
-        }
-        arm.mesh.geometry.setAttribute('color', new T.Float32BufferAttribute(colors, 3));
-      } else {
-        const weights = new Float32Array((arm.rows + 1) * arm.cols);
-        for (let row = 0; row <= arm.rows; row++) {
-          const weight = T.MathUtils.smoothstep(row / arm.rows, 0.03, 0.31);
-          weights.fill(weight, row * arm.cols, (row + 1) * arm.cols);
-        }
-        arm.mesh.geometry.setAttribute('pawContrast', new T.BufferAttribute(weights, 1));
-      }
-      arms.push(arm);
+      const sleeve = forelegCoat(mats.fur,
+        long ? mats.light.color : mats.fur.color,
+        long ? mats.light.color : new T.Color('#cebbba'), side, !long);
+      arms.push(new Foreleg(root, sleeve));
       const heel = group(root);
-      const haunch = egg(heel, mats.fur, 0, 0.225, -0.018, 0.275, 0.307, 0.345);
-      haunch.rotation.x = -0.51;
+      // The top of the folded hind leg disappears into the flank. The broad
+      // base narrows into the desk, leaving a single rounded outside contour.
+      skinSurface(heel, mats.fur, [
+        [-.092,.09,.12,0,.16], [-.057,.19,.23,0,.145],
+        [.075,.24,.285,.018*side,.105], [.28,.263,.31,.055*side,-.02],
+        [.52,.30,.36,.065*side,-.18], [.73,.24,.30,-.045*side,-.30],
+        [.88,.09,.14,-.12*side,-.30]
+      ], 40);
       hind.push(heel);
     }
     const tail = new Limb(
@@ -648,10 +764,10 @@
       root,
       trunk,
       body,
+      ribs,
       head,
       ears,
       eyes,
-      feet,
       arms,
       hind,
       tail,
@@ -660,7 +776,6 @@
       mouth,
       long,
       mats,
-      tufts,
     };
   }
   function keyboard(parent) {
@@ -1140,6 +1255,7 @@
           0.04,
           Math.min(blink, 1 - 0.94 * m.reliefBlink) * openness
         );
+        eye.aperture.value = eye.lid.scale.y;
         eye.lid.rotation.z = s * (0.015 + 0.08 * d + 0.29 * heat);
         eye.gaze.value.set(
           m.gaze[0] * (0.21 + 0.085 * slowLook),
@@ -1161,70 +1277,32 @@
               0.11 * m.lookup) +
           0.019 * Math.sin(t * 2.7 + i);
         e.rotation.x = -0.22 * heat + 0.06 * m.earBounce;
-        const pp = m.paws[i].pos,
-          baseX = -0.12 - 0.43 * sideways + leanX * 0.78,
-          reachSide = i === 0 ? sideways : 0,
-          root = V(
-            baseX + s * 0.31 - 0.21 * reachSide,
-            1.76 - dip * 0.39,
-            0.52 + leanZ * 0.71 - 0.06 * reachSide
-          ),
-          end = covered
-            ? c.head.localToWorld(V(s * 0.425, 0.155, 0.91))
-            : V(pp.x, pp.y, pp.z);
-        const away = Math.abs(end.x - root.x);
-        const elbow = V(
-          mix(root.x, end.x, 0.48) + s * (0.08 + 0.055 * away),
-          mix(root.y, end.y, 0.48) + 0.085 * typing,
-          mix(root.z, end.z, 0.4) + 0.1
+        const paw = m.paws[i], pp = paw.pos;
+        const reach = i === 0 && !covered ? sideways : 0;
+        const shoulder = V(
+          -.12 + s*.46 - .48*sideways - .27*reach + leanX*.83,
+          1.92 - .44*dip - .17*reach,
+          .49 + leanZ*.79 + .12*reach
         );
-        const curl = clamp((end.y - 0.37) * 2) * (1 - sideways) * (1 - n);
-        // Pull the elbow in behind the wrist so the reaching foreleg has a visible bend.
-        if (i === 0) {
-          elbow.x += 0.17 * sideways;
-          elbow.y -= 0.16 * sideways;
-          elbow.z -= 0.12 * sideways;
-        }
-        elbow.x += s * 0.16 * curl + s * 0.29 * covered;
-        elbow.z += 0.11 * curl;
-        elbow.y -= 0.19 * curl;
-        // Carry the extended foreleg onto the mouse, then roll over the toe pad.
-        const extension = i === 0 && !covered ? sideways : 0;
-        const wrist = V(
-          mix(elbow.x, end.x, 0.78) - 0.13 * extension,
-          end.y + 0.13 - 0.12 * curl + 0.085 * extension,
-          mix(elbow.z, end.z, 0.8)
-        );
-        const armPoints = [
-          V(root.x - 0.08 * s, root.y + 0.12, root.z - 0.48),
-          V(
-            mix(root.x, elbow.x, 0.47),
-            mix(root.y, elbow.y, 0.48),
-            mix(root.z, elbow.z, 0.42)
-          ),
-          elbow,
-          wrist,
-          V(
-            end.x - 0.118 * extension,
-            end.y + 0.072 - 0.035 * extension,
-            end.z - 0.045 + 0.18 * extension
-          ),
-        ];
-        c.arms[i].pose(armPoints);
-        c.feet[i].children[0].scale.set(
-          0.216 * (1 - 0.19 * extension),
-          0.160 * (1 - 0.24 * extension),
-          0.246 * (1 - 0.16 * extension)
-        );
-        c.feet[i].position.copy(end);
-        c.feet[i].rotation.z =
-          s * 0.39 * covered +
-          clamp((root.x - end.x) * 0.24, -0.53, 0.53) +
-          s * 0.52 * curl;
+        const palm = covered
+          ? c.head.localToWorld(V(s*.425,.155,.92))
+          : V(pp.x, pp.y, pp.z);
+        const key = layout.get(paw.code);
+        // Only the active paw follows its cap. A previous keystroke cannot pull
+        // a tucked paw down when the mouse or privacy gesture takes over.
+        const keyContact = !covered && key && Math.abs(pp.x-key.x)<.15 &&
+          Math.abs(pp.z-key.z)<.13 ? m.keyDepth(key.code,t) : 0;
+        const mouseContact = reach * (1-T.MathUtils.smoothstep(
+          Math.hypot(pp.x + 2.32 - m.mouseOffset[0], pp.z - 1.82 - m.mouseOffset[1]),.20,.46));
+        palm.z -= .08 * mouseContact;
+        palm.y += .018*(1 - T.MathUtils.smoothstep(pp.y,.125,.22))*(1-covered) +
+          mouseContact*(.141 + .073*Math.max(...m.press)) +
+          keyContact*(.073 - .046*keyContact);
+        c.arms[i].place(shoulder, palm, s, reach, covered, Math.max(keyContact, mouseContact*.72), c.body, c.ribs);
         c.hind[i].position.set(
-          0.05 + s * 0.71 + 0.07 * sideways,
+          0.11 + s * 0.67 + 0.045 * sideways,
           0.099,
-          0.51 + (i ? -0.04 : 0.03) * sideways
+          0.24 + (i ? -0.025 : 0.02) * sideways
         );
       }
       const [mx, mz] = m.mouseOffset;
@@ -1283,8 +1361,8 @@
         [
           V(tailBaseX, 0.43, -0.55),
           V(tailBaseX + 0.38, 0.4, -0.65),
-          V(tx - 0.49, 0.54 + 0.15 * up - 0.24 * slam, -0.57 + 0.22 * slam),
-          V(tx - 0.23, 1.13 + up - 1.01 * slam - 0.69 * n, -0.42 + 1.22 * slam),
+          V(tx - 0.54, 0.59 + 0.15 * up - 0.24 * slam, -0.57 + 0.22 * slam),
+          V(tx - 0.26, 1.06 + up - 1.01 * slam - 0.69 * n, -0.42 + 1.22 * slam),
           tip,
         ],
         c.long ? 1.1 : 1

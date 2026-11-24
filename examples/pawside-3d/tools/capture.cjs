@@ -4,6 +4,38 @@ const { app, BrowserWindow } = require('electron');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const ref = require('../web/reference.js');
+// Runs inside the isolated renderer before a reference take. Read the deformed
+// sole and the moving key mesh so a change in either model can break the check.
+function verifyKeyContacts(pet) {
+  pawReview.begin(pet, 420, 288, 'reference');
+  const view = pawReview.view;
+  const motion = new PawMotion.Motion(pet);
+  const transform = new THREE.Matrix4();
+  for (const key of PawMotion.layout.values()) {
+    motion.reset(0);
+    motion.down(key.code, 0.02);
+    for (let frame = 1; frame <= 11; frame++) motion.step(frame / 60);
+    view.render(motion, 11 / 60);
+
+    const cap = view.caps.get(key.code);
+    const geometry = cap.batch.geometry;
+    if (!geometry.boundingBox) geometry.computeBoundingBox();
+    cap.batch.getMatrixAt(cap.index, transform);
+    const bounds = geometry.boundingBox.clone().applyMatrix4(transform);
+    const side = motion.paws.findIndex((paw) => paw.code === key.code);
+    const leg = view.cat.arms[side];
+    let clearance = Infinity;
+    for (let i = 0; i < leg.pos.count; i++) {
+      const x = leg.pos.getX(i), z = leg.pos.getZ(i);
+      if (x >= bounds.min.x && x <= bounds.max.x && z >= bounds.min.z && z <= bounds.max.z)
+        clearance = Math.min(clearance, leg.pos.getY(i) - bounds.max.y);
+    }
+    // About half a pixel in the reference take; allow a little pad compression.
+    if (!(Math.abs(clearance) <= 0.009))
+      throw new Error(pet + ' / ' + key.code + ' sole-to-cap gap: ' + clearance);
+  }
+}
+
 async function capture() {
   const scriptIndex = process.argv.findIndex(
     (arg) => path.resolve(arg) === __filename
@@ -30,6 +62,7 @@ async function capture() {
     await win.loadFile(path.join(__dirname, '..', 'web', 'index.html'));
     const run = (js) => win.webContents.executeJavaScript(js);
     for (const pet of ['ink', 'chestnut']) {
+      await run('(' + verifyKeyContacts.toString() + ')(' + JSON.stringify(pet) + ')');
       await run(
         'pawReview.begin(' + JSON.stringify(pet) + ',720,520,"reference")'
       );
