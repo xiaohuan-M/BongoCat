@@ -208,12 +208,13 @@
       a.setZ(i, faceDepth(a.getX(i), a.getY(i)) + 0.039);
     return mesh(head, g, mat);
   }
-  function inkForepaw(fur) {
+  function inkForepaw(fur, side) {
     const material = fur.clone();
     // The paw cap is a sphere. Only the foreleg needs a fade into the shoulder.
     material.defaultAttributeValues = { pawContrast: [1] };
     material.onBeforeCompile = (shader) => {
-      shader.uniforms.pawFill = { value: new T.Color('#ada1a3') };
+      shader.uniforms.pawFill = { value: new T.Color('#d5c7b9') };
+      shader.uniforms.pawSide = { value: side };
       shader.vertexShader =
         'attribute float pawContrast; varying float pawWeight;\n' +
         shader.vertexShader.replace(
@@ -221,13 +222,16 @@
           '#include <begin_vertex>\npawWeight = pawContrast;'
         );
       shader.fragmentShader =
-        'uniform vec3 pawFill; varying float pawWeight;\n' +
+        'uniform vec3 pawFill; uniform float pawSide; varying float pawWeight;\n' +
         shader.fragmentShader.replace(
           '#include <opaque_fragment>',
           `float facing = abs(dot(normalize(normal), normalize(vViewPosition)));
-           float rim = 1.0 - smoothstep(0.08, 0.65, facing);
+           float rim = 1.0 - smoothstep(0.12, 0.52, facing);
+           float innerArc = smoothstep(-0.35, 0.55, -normal.x * pawSide);
+           float crest = smoothstep(0.03, 0.19, facing) * (1.0 - smoothstep(0.24, 0.45, facing));
+           float glancingLight = rim * (0.15 + 0.47 * innerArc) + 0.26 * crest * innerArc;
            float darkCoat = 1.0 - smoothstep(0.05, 0.25, dot(diffuse, vec3(0.2126, 0.7152, 0.0722)));
-           outgoingLight = mix(outgoingLight, pawFill, pawWeight * darkCoat * (0.082 + 0.34 * rim));
+           outgoingLight = mix(outgoingLight, pawFill, pawWeight * darkCoat * (0.035 + glancingLight));
            #include <opaque_fragment>`
         );
     };
@@ -243,29 +247,43 @@
           ? new T.MeshLambertMaterial({ color: tint, side: T.DoubleSide })
           : color(tint);
     }
+    if (!long) {
+      // A grazing studio light catches short arcs on the cheek and shoulder at a turn.
+      mats.fur.onBeforeCompile = (shader) => {
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <opaque_fragment>',
+          `float grazing = 1.0 - smoothstep(0.07, 0.48, abs(dot(normal, normalize(vViewPosition))));
+           float litSide = smoothstep(0.16, 0.95, dot(normal, normalize(vec3(-0.62, 0.78, 0.08))));
+           outgoingLight += vec3(0.072, 0.059, 0.050) * grazing * litSide;
+           #include <opaque_fragment>`
+        );
+      };
+    }
     mats.pupil = color('#17151b');
-    mats.whisk = color(long ? '#f3cdac' : '#aba6a4');
+    mats.whisk = color(long ? '#f3cdac' : '#aca5a2');
+    const muzzleTint = color(long ? p.light : '#322b2d');
+    const noseTint = color(long ? '#946856' : '#8c6865');
     mats.sole = color(long ? '#f4d3af' : '#f1ede2');
     const root = group(parent),
       trunk = group(root),
       head = group(root);
     const body = skinSurface(trunk, mats.fur, [
       [0.035, 0.44, 0.44, 0.08, -0.19],
-      [0.13, 0.78, 0.73, 0.1, -0.25],
-      [0.45, 0.96, 0.88, 0.13, -0.27],
-      [0.88, 0.93, 0.87, 0.1, -0.24],
-      [1.4, 0.78, 0.73, 0.03, -0.13],
-      [1.9, 0.62, 0.58, -0.06, -0.01],
+      [0.14, 0.86, 0.77, 0.07, -0.23],
+      [0.47, 1.06, 0.91, 0.08, -0.21],
+      [0.92, 1.02, 0.91, 0.045, -0.15],
+      [1.41, 0.88, 0.78, -0.005, -0.07],
+      [1.89, 0.69, 0.61, -0.065, 0.00],
       [2.35, 0.47, 0.46, -0.1, 0.05],
       [2.66, 0.39, 0.38, -0.11, 0.08],
     ]);
     const sideShape = skinSurface(trunk, mats.fur, [
       [0.035, 0.61, 0.48, 0.3, -0.13],
       [0.13, 1.05, 0.68, 0.32, -0.18],
-      [0.45, 1.19, 0.76, 0.25, -0.24],
-      [0.88, 1.13, 0.75, 0.12, -0.2],
-      [1.4, 0.91, 0.67, -0.18, -0.09],
-      [1.9, 0.72, 0.57, -0.51, 0.0],
+      [0.45, 1.24, 0.82, 0.20, -0.20],
+      [0.96, 1.18, 0.81, 0.065, -0.15],
+      [1.52, 0.96, 0.72, -0.23, -0.06],
+      [1.98, 0.74, 0.61, -0.56, 0.04],
       [2.35, 0.54, 0.47, -0.83, 0.09],
       [2.66, 0.41, 0.40, -0.99, 0.12],
     ]);
@@ -306,28 +324,29 @@
     }
     // A rounded trapezoid under the ears gives the face width at the cheeks.
     skinSurface(head, mats.fur, [
-      [-0.7, 0.055, 0.065, 0, 0.03],
-      [-0.61, 0.48, 0.4, 0, 0.02],
-      [-0.43, 0.78, 0.57, 0, 0],
-      [-0.16, 0.94, 0.68, 0, 0],
-      [0.13, 0.92, 0.68, 0, -0.008],
-      [0.4, 0.806, 0.55, 0, -0.02],
-      [0.59, 0.53, 0.39, 0, -0.025],
-      [0.69, 0.055, 0.06, 0, -0.05],
+      [-0.67, 0.095, 0.095, 0, 0.055],
+      [-0.57, 0.60, 0.47, 0, 0.06],
+      [-0.41, 0.89, 0.61, 0, 0.045],
+      [-0.15, 1.01, 0.70, 0, 0.015],
+      [0.15, 0.96, 0.71, 0, 0.0],
+      [0.44, 0.82, 0.60, 0, -0.009],
+      [0.64, 0.57, 0.43, 0, -0.02],
+      [0.75, 0.065, 0.075, 0, -0.035],
     ]);
-    head.scale.set(1.11, 1.055, 1.075);
+    head.scale.set(long ? 1.17 : 1.20, 1.13, 1.10);
     const ears = [],
       eyes = [],
       feet = [],
       arms = [],
       hind = [],
       tufts = [];
-    const sleeve = long
+    const bibSleeve = long
       ? new T.MeshLambertMaterial({ vertexColors: true, side: T.DoubleSide })
-      : inkForepaw(mats.fur);
+      : null;
     for (const side of [-1, 1]) {
+      const sleeve = bibSleeve || inkForepaw(mats.fur, side);
       const ear = group(head);
-      ear.position.set(side * (long ? 0.51 : 0.46), 0.35, -0.12);
+      ear.position.set(side * (long ? 0.57 : 0.54), 0.40, -0.11);
       skinSurface(
         ear,
         mats.fur,
@@ -409,10 +428,15 @@
           [side * 0.39, 0.38, side * 0.37, 0.46],
         ]);
       }
-      ear.scale.set(1.03, long ? 0.93 : 0.87, 1);
+      if (!long) {
+        // Low-contrast muzzle pads keep the nose legible against the black coat.
+        const pad = egg(head, muzzleTint, side * 0.107, -0.236, 0.694, 0.15, 0.091, 0.063);
+        pad.rotation.z = side * 0.13;
+      }
+      ear.scale.set(1.04, long ? 0.91 : 0.80, 1);
       ears.push(ear);
       const socket = group(head);
-      socket.position.set(side * 0.37, 0.182, 0.641);
+      socket.position.set(side * 0.399, 0.113, 0.703);
       socket.rotation.set(-0.2, side * 0.28, 0);
       const lid = group(socket);
       const paint = color(p.eye);
@@ -434,21 +458,24 @@
             `#include <color_fragment>
           vec2 pt=eyePoint-pawGaze;
           float iris=1.-smoothstep(.94,1.02,length(pt/pawPupil));
-          diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.008,.007,.009),iris);
-          float glint=1.-smoothstep(.070,.099,length(pt-vec2(-.09,.27)));
-          diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.98,.95,.83),glint*.88);`
+          float lower=1.-smoothstep(-.86,.65,eyePoint.y);
+          diffuseColor.rgb*=mix(.73,1.10,lower);
+          diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.009,.007,.009),iris);
+          float glint=1.-smoothstep(.115,.149,length(pt-vec2(-.15,.30)));
+          float fleck=1.-smoothstep(.045,.068,length(pt-vec2(.11,-.20)));
+          diffuseColor.rgb=mix(diffuseColor.rgb,vec3(1.,.96,.84),max(glint*.96,fleck*.57));`
           );
       };
-      egg(lid, paint, 0, 0, 0, 0.248, 0.223, 0.079);
+      egg(lid, paint, 0, 0, 0, 0.272, 0.268, 0.092);
       eyes.push({ socket, lid, gaze, pupil });
       for (let j = 0; j < 3; j++)
         stroke(
           head,
           mats.whisk,
           [
-            [side * 0.49, -0.255 - j * 0.044, 0.53],
-            [side * 0.69, -0.252 - j * 0.062, 0.48],
-            [side * (0.87 + 0.025 * j), -0.3 - j * 0.1, 0.38],
+            [side * 0.56, -0.235 - j * 0.044, 0.60],
+            [side * 0.77, -0.236 - j * 0.055, 0.50],
+            [side * (0.97 + 0.028 * j), -0.27 - j * 0.079, 0.42],
           ],
           0.008
         );
@@ -527,7 +554,7 @@
       });
     }
     const mouth = group(head);
-    mouth.position.set(0, -0.335, long ? 0.713 : 0.642);
+    mouth.position.set(0, -0.328, long ? 0.747 : 0.735);
     mouth.rotation.x = -0.39;
     const lip = color(long ? '#774337' : '#654656');
     egg(mouth, lip, 0, 0, 0, 0.12, 0.105, 0.027);
@@ -554,13 +581,13 @@
     }
     const nose = egg(
       head,
-      long ? mats.shade : mats.fur,
+      noseTint,
       0,
-      -0.215,
-      long ? 0.728 : 0.656,
-      0.064,
-      0.035,
-      0.022
+      -0.187,
+      long ? 0.754 : 0.758,
+      0.067,
+      0.040,
+      0.034
     );
     return {
       root,
@@ -1011,11 +1038,11 @@
           (0.91 + 0.18 * m.grab) * sideways +
           leanX * 1.03 +
           0.13 * rub * Math.sin(t * 6),
-        hz = 0.145 + leanZ * 1.11;
+        hz = 0.20 + leanZ * 1.11;
       c.head.position.set(
         hx,
-        2.98 +
-          0.15 * (1 - sideways) +
+        2.86 +
+          0.34 * (1 - sideways) +
           0.025 * breath -
           dip +
           0.1 * h +
@@ -1062,10 +1089,10 @@
           0.12 - 0.07 * typing + 0.22 * m.gaze[1]
         );
         eye.pupil.value.set(
-          (0.37 + 0.31 * m.hunt + 0.095 * slowLook + 0.14 * m.lookup) *
+          (0.50 + 0.26 * m.hunt + 0.095 * slowLook + 0.14 * m.lookup) *
             (1 - 0.44 * d) *
             (1 - 0.42 * heat),
-          0.7 + 0.065 * m.hunt
+          0.77 + 0.065 * m.hunt
         );
         const e = c.ears[i];
         e.rotation.z =
@@ -1079,9 +1106,14 @@
         e.rotation.x = -0.22 * heat + 0.06 * m.earBounce;
         const pp = m.paws[i].pos,
           baseX = -0.12 - 0.43 * sideways + leanX * 0.78,
-          root = V(baseX + s * 0.31, 1.78 - dip * 0.39, 0.36 + leanZ * 0.71),
+          reachSide = i === 0 ? sideways : 0,
+          root = V(
+            baseX + s * 0.31 - 0.21 * reachSide,
+            1.78 - dip * 0.39,
+            0.36 + leanZ * 0.71 - 0.08 * reachSide
+          ),
           end = covered
-            ? c.head.localToWorld(V(s * 0.36, 0.13, 0.84))
+            ? c.head.localToWorld(V(s * 0.397, 0.11, 0.88))
             : V(pp.x, pp.y, pp.z);
         const away = Math.abs(end.x - root.x);
         const elbow = V(
@@ -1092,7 +1124,7 @@
         const curl = clamp((end.y - 0.37) * 2) * (1 - sideways) * (1 - n);
         // Pull the elbow in behind the wrist so the reaching foreleg has a visible bend.
         if (i === 0) {
-          elbow.x += 0.26 * sideways;
+          elbow.x += 0.17 * sideways;
           elbow.y -= 0.16 * sideways;
           elbow.z -= 0.12 * sideways;
         }
@@ -1133,7 +1165,7 @@
           clamp((root.x - end.x) * 0.24, -0.53, 0.53) +
           s * 0.52 * curl;
         c.hind[i].position.set(
-          0.05 + s * 0.64 + 0.08 * sideways,
+          0.05 + s * 0.68 + 0.07 * sideways,
           0.099,
           0.64 + (i ? -0.02 : 0.05) * sideways
         );
