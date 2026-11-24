@@ -538,10 +538,14 @@
           );
         }
       }
-      const target =
-        t - this.lastInput < 2
-          ? this.focus
-          : [0.17 * Math.sin(t * 0.71), 0.1 * Math.sin(t * 0.83)];
+      // Let the eyes linger at the mouse as the paws settle. Then release the
+      // gaze gradually, so a resting cat does not snap back to a forward stare.
+      const mouseWasLast = this.lastMouse && this.lastMouseAt >= this.lastStrike;
+      const attention = 1 - ease((quiet - 1.8) / (mouseWasLast ? 2.4 : 0.65));
+      const target = [
+        mix(0.17 * Math.sin(t * 0.71), this.focus[0], attention),
+        mix(0.10 * Math.sin(t * 0.83), this.focus[1], attention),
+      ];
       const f = [
         mix(target[0], 0, this.lookup),
         mix(target[1], 0.96, this.lookup),
