@@ -208,6 +208,31 @@
       a.setZ(i, faceDepth(a.getX(i), a.getY(i)) + 0.039);
     return mesh(head, g, mat);
   }
+  function inkForepaw(fur) {
+    const material = fur.clone();
+    // The paw cap is a sphere. Only the foreleg needs a fade into the shoulder.
+    material.defaultAttributeValues = { pawContrast: [1] };
+    material.onBeforeCompile = (shader) => {
+      shader.uniforms.pawFill = { value: new T.Color('#ada1a3') };
+      shader.vertexShader =
+        'attribute float pawContrast; varying float pawWeight;\n' +
+        shader.vertexShader.replace(
+          '#include <begin_vertex>',
+          '#include <begin_vertex>\npawWeight = pawContrast;'
+        );
+      shader.fragmentShader =
+        'uniform vec3 pawFill; varying float pawWeight;\n' +
+        shader.fragmentShader.replace(
+          '#include <opaque_fragment>',
+          `float facing = abs(dot(normalize(normal), normalize(vViewPosition)));
+           float rim = 1.0 - smoothstep(0.08, 0.65, facing);
+           float darkCoat = 1.0 - smoothstep(0.05, 0.25, dot(diffuse, vec3(0.2126, 0.7152, 0.0722)));
+           outgoingLight = mix(outgoingLight, pawFill, pawWeight * darkCoat * (0.082 + 0.34 * rim));
+           #include <opaque_fragment>`
+        );
+    };
+    return material;
+  }
   function makeCat(parent, id, overrides = {}) {
     const long = id === 'chestnut',
       p = { ...palettes[id], ...overrides };
@@ -299,7 +324,7 @@
       tufts = [];
     const sleeve = long
       ? new T.MeshLambertMaterial({ vertexColors: true, side: T.DoubleSide })
-      : mats.fur;
+      : inkForepaw(mats.fur);
     for (const side of [-1, 1]) {
       const ear = group(head);
       ear.position.set(side * (long ? 0.51 : 0.46), 0.35, -0.12);
@@ -431,7 +456,7 @@
       egg(sole, mats.sole, 0, 0.015, 0.084, 0.149, 0.091, 0.181);
       egg(
         sole,
-        long ? mats.light : mats.fur,
+        long ? mats.light : sleeve,
         0,
         0.091,
         0.002,
@@ -452,6 +477,13 @@
           for (let k = 0; k < arm.cols; k++) colors.push(tint.r, tint.g, tint.b);
         }
         arm.mesh.geometry.setAttribute('color', new T.Float32BufferAttribute(colors, 3));
+      } else {
+        const weights = new Float32Array((arm.rows + 1) * arm.cols);
+        for (let row = 0; row <= arm.rows; row++) {
+          const weight = T.MathUtils.smoothstep(row / arm.rows, 0.03, 0.31);
+          weights.fill(weight, row * arm.cols, (row + 1) * arm.cols);
+        }
+        arm.mesh.geometry.setAttribute('pawContrast', new T.BufferAttribute(weights, 1));
       }
       arms.push(arm);
       const heel = group(root);
