@@ -54,6 +54,10 @@ want it again.
 Inspired by [Bongo-Cat-Mver](https://github.com/MMmmmoko/Bongo-Cat-Mver) by
 [MMmmmoko](https://github.com/MMmmmoko).
 
+## KuroCat Classic
+
+This branch includes the upstream black cat, keyboard, and mouse animations. See the [offline preview and desktop setup](examples/kurocat-classic/README.md).
+
 ## Features
 
 - Runs on macOS and Windows.

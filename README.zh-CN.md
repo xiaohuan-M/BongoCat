@@ -50,6 +50,10 @@ BongoCat 是一款面向 Windows 和 macOS 的桌面陪伴应用。一只 Live2D
 
 灵感来自 [MMmmmoko](https://github.com/MMmmmoko) 的 [Bongo-Cat-Mver](https://github.com/MMmmmoko/Bongo-Cat-Mver)。
 
+## KuroCat 经典桌宠
+
+本分支提供原版小黑猫、键盘和鼠标动作。打开[离线预览与桌面版说明](examples/kurocat-classic/README.md)。
+
 ## 功能介绍
 
 - 适配 macOS、Windows。

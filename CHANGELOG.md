@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### ✨ Features
+
+- Added a standalone KuroCat Classic example with the upstream desktop source and an offline interactive black-cat preview.
+
 ## 2.4.1 - 2026-10-28
 
 ### 🎨 Interface

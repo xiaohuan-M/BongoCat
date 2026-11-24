@@ -1,0 +1,3 @@
+[submodule "kurocat-classic"]
+	path = examples/kurocat-classic/upstream
+	url = https://github.com/qianyiai/kurocat.git
