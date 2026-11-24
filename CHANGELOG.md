@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### ✨ Features
+
+- Added the optional Pawside 3D companion with two cats, per-key reactions, mouse button chords, scrolling, one-paw typing, graded Backspace reactions, a reference replay and protected-input poses.
+
 ## 2.4.1 - 2026-10-28
 
 ### 🎨 Interface

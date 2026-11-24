@@ -1,0 +1,538 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>爪边 Pawside · 三维桌宠</title>
+    <style>
+      :root {
+        --paper: #faf7ed;
+        --ink: #292f28;
+        --muted: #656c61;
+        --line: #cfd2c1;
+        --stage: #f3e5cd;
+        --green: #435844;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--ink);
+        font:
+          15px/1.55 'PingFang SC',
+          'Microsoft YaHei',
+          system-ui,
+          sans-serif;
+      }
+      main {
+        max-width: 1320px;
+        margin: auto;
+        padding: 25px clamp(16px, 4vw, 60px) 40px;
+      }
+      header,
+      .toolbar,
+      .under,
+      .chips,
+      .row,
+      .stats,
+      .brand {
+        display: flex;
+        align-items: center;
+      }
+      header,
+      .under,
+      .toolbar {
+        justify-content: space-between;
+      }
+      header {
+        padding-bottom: 15px;
+        border-bottom: 1px solid var(--line);
+      }
+      .brand {
+        gap: 10px;
+        line-height: 1;
+      }
+      .brand b {
+        font:
+          700 30px 'Songti SC',
+          serif;
+      }
+      .brand i,
+      .en {
+        font:
+          italic 22px Georgia,
+          serif;
+        color: #787852;
+      }
+      header > span {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      section.layout {
+        margin-top: 23px;
+        display: grid;
+        grid-template-columns: minmax(0, 1.9fr) minmax(275px, 0.82fr);
+        gap: clamp(20px, 4vw, 54px);
+      }
+      .stage {
+        position: relative;
+        overflow: hidden;
+        background:
+          radial-gradient(ellipse at 28% 23%, #fff8e94a, transparent 66%),
+          var(--stage);
+        border: 1px solid #cfc7af;
+        border-radius: 18px;
+      }
+      .stage canvas {
+        width: 100%;
+        aspect-ratio: 1.42;
+        display: block;
+        touch-action: none;
+        outline: none;
+      }
+      .stage canvas:focus-visible {
+        outline: 2px solid #7a865b;
+        outline-offset: -3px;
+      }
+      .scene-title {
+        pointer-events: none;
+        position: absolute;
+        top: 13px;
+        left: 17px;
+        font:
+          italic 17px Georgia,
+          serif;
+        color: #665d49;
+      }
+      .stats {
+        position: absolute;
+        bottom: 12px;
+        left: 15px;
+        gap: 7px;
+        pointer-events: none;
+      }
+      .stats > * {
+        padding: 3px 10px;
+        background: #fffaf0dd;
+        border: 1px solid #ccc4ae;
+        border-radius: 16px;
+        font:
+          12px/1.5 ui-monospace,
+          'PingFang SC',
+          monospace;
+      }
+      .stats .hot {
+        background: #efd1bc;
+        color: #8b3a31;
+      }
+      .under {
+        margin: 9px 0 13px;
+      }
+      .chips,
+      .row,
+      .toolbar {
+        gap: 7px;
+        flex-wrap: wrap;
+      }
+      button,
+      .file {
+        font: inherit;
+        font-size: 13px;
+        color: inherit;
+        background: #fffdf6;
+        border: 1px solid #bfc4b2;
+        border-radius: 8px;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+      button:hover,
+      .file:hover {
+        background: #edf0e4;
+      }
+      button:focus-visible,
+      .file:focus-within,
+      summary:focus-visible {
+        outline: 2px solid #748360;
+        outline-offset: 2px;
+      }
+      button:disabled {
+        opacity: 0.55;
+      }
+      .mainbtn {
+        background: var(--green);
+        border-color: var(--green);
+        color: #fff;
+      }
+      .mainbtn:hover {
+        background: #34503b;
+      }
+      button[data-act='rage'] {
+        border-color: #cda997;
+        color: #84483d;
+        background: #faf0e4;
+      }
+      .under button {
+        background: transparent;
+      }
+      .swatch {
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        padding: 3px;
+        background: var(--c) !important;
+        background-clip: content-box !important;
+        border: 1px solid transparent;
+      }
+      .swatch[aria-pressed='true'] {
+        border-color: #5a634b;
+      }
+      .quiet {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .tip {
+        font-size: 12px;
+        color: var(--muted);
+        margin: 9px 0;
+      }
+      .side h1 {
+        font:
+          bold 34px/1.2 'Songti SC',
+          Georgia,
+          serif;
+        margin: 0 0 15px;
+      }
+      .cats {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      .cat {
+        padding: 8px 5px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        text-align: left;
+      }
+      .cat img {
+        width: 48px;
+        height: 48px;
+        object-fit: contain;
+      }
+      .cat b,
+      .cat small {
+        display: block;
+      }
+      .cat b {
+        font-size: 15px;
+      }
+      .cat small {
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .cat[aria-pressed='true'] {
+        background: #edf1e4;
+        border-color: #596e51;
+        box-shadow: inset 0 0 0 1px #596e51;
+      }
+      .side p {
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.75;
+      }
+      details,
+      .section {
+        margin-top: 16px;
+        border-top: 1px solid var(--line);
+        padding-top: 15px;
+      }
+      summary {
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .file {
+        display: inline-block;
+      }
+      .file input {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+      }
+      .actions {
+        display: grid;
+        gap: 8px;
+      }
+      .actions > button {
+        width: 100%;
+      }
+      .status {
+        min-height: 1.5em;
+      }
+      .back {
+        padding: 4px 0;
+        border: 0;
+      }
+      .focus .side,
+      .focus header {
+        display: none;
+      }
+      .focus .layout {
+        grid-template-columns: minmax(0, 920px);
+        justify-content: center;
+      }
+      .focus .stage canvas {
+        max-height: 72vh;
+      }
+      .desk {
+        background: transparent !important;
+        overflow: hidden;
+      }
+      .desk main {
+        padding: 0;
+      }
+      .desk .layout {
+        margin: 0;
+        display: block;
+      }
+      .desk header,
+      .desk .side,
+      .desk .under,
+      .desk .chips,
+      .desk .tip,
+      .desk .stats,
+      .desk .scene-title,
+      .desk #status {
+        display: none;
+      }
+      .desk .stage {
+        background: transparent;
+        border: 0;
+        border-radius: 0;
+      }
+      .desk .stage canvas {
+        width: 100vw;
+        height: 100vh;
+      }
+      .desk .winbar {
+        position: fixed;
+        z-index: 5;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 30px;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 4px;
+        -webkit-app-region: drag;
+        opacity: 0;
+      }
+      .desk:hover .winbar,
+      .desk .winbar:focus-within {
+        opacity: 1;
+      }
+      .winbar {
+        display: none;
+      }
+      .winbar button {
+        -webkit-app-region: no-drag;
+        padding: 3px 7px;
+        font-size: 11px;
+      }
+      .color {
+        border: 0;
+        width: 30px;
+        height: 29px;
+        background: none;
+        vertical-align: middle;
+      }
+      .failed {
+        position: absolute;
+        inset: 18%;
+        padding: 14px;
+        background: #fffaed;
+        overflow: auto;
+        font-size: 14px;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      @media (max-width: 760px) {
+        main {
+          padding: 15px 14px 26px;
+        }
+        .layout,
+        section.layout {
+          display: flex;
+          flex-direction: column;
+          gap: 22px;
+          margin-top: 15px;
+        }
+        .stage canvas {
+          aspect-ratio: 1.28;
+        }
+        .side h1 {
+          font-size: 27px;
+        }
+        .cat {
+          gap: 12px;
+        }
+        .scene-title {
+          font-size: 13px;
+        }
+        .stats {
+          bottom: 8px;
+          left: 9px;
+        }
+        .chips {
+          gap: 5px;
+        }
+        .chips button {
+          padding: 7px 10px;
+        }
+        .desk .layout {
+          margin: 0;
+        }
+      }
+      .input-check{margin-top:12px;color:var(--ink);font:inherit}
+      .input-check summary{cursor:pointer;font-size:.91rem}
+      .input-check label,.input-check small{display:block;margin:8px 0}
+      .input-check input{max-width:100%;padding:6px 9px;border:1px solid #a8ad9e;border-radius:7px;background:#fffdf5;color:#242c26}
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="brand"><b>爪边</b><i>Pawside</i></div>
+        <span>三维桌宠工作室</span>
+      </header>
+      <section class="layout">
+        <div>
+          <div class="stage">
+            <span class="scene-title" id="english">Ink Cat</span
+            ><canvas
+              id="scene"
+              tabindex="0"
+              aria-label="猫与键盘。按键或点键帽，点猫头打招呼。"
+            ></canvas>
+            <div class="stats">
+              <span id="state" role="status">待机</span
+              ><span id="speed">0.0 键 / 秒</span>
+            </div>
+            <div class="failed" id="fail" hidden></div>
+          </div>
+          <div class="under">
+            <div class="row" aria-label="场景底色">
+              <button
+                class="swatch"
+                data-bg="oat"
+                style="--c: #f1eee5"
+                aria-label="暖灰底色"
+              ></button
+              ><button
+                class="swatch"
+                data-bg="sage"
+                style="--c: #bfcfb9"
+                aria-label="鼠尾草底色"
+              ></button
+              ><button
+                class="swatch"
+                data-bg="blue"
+                style="--c: #bad2db"
+                aria-label="雾蓝底色"
+              ></button>
+            </div>
+            <button id="focus" class="back quiet" aria-pressed="false">
+              专注视图 ↗
+            </button>
+          </div>
+          <div class="chips">
+            <button class="mainbtn" data-act="reference">▶ 原片复刻</button
+            ><button data-act="tempo">▶ 表情对照</button
+            ><button data-act="demo">▶ 动作演示</button
+            ><button data-act="hands">键鼠合奏</button
+            ><button data-act="mouse">握鼠标</button
+            ><button data-act="slow">慢敲</button
+            ><button data-act="steady">连打</button
+            ><button data-act="fast">飞速打字</button
+            ><button data-act="rage">⌫ 退格暴走</button
+            ><button data-act="hello">摸摸头</button>
+          </div>
+          <details class="input-check">
+            <summary>试试普通输入和密码保护</summary>
+            <label>普通试打 <input id="try-text" type="text" autocomplete="off" placeholder="随手打几个字"></label>
+            <label>隐私试打 <input id="try-private" type="password" autocomplete="off" data-private placeholder="只用测试字符"></label>
+            <small>聚焦隐私框时，两只前爪捂眼。离开后清空测试框。</small>
+          </details>
+          <p class="tip">
+            在画布空处按住鼠标再打字，或滚动滚轮。点键帽可试单键，按住退格看它锤键。
+          </p>
+        </div>
+        <aside class="side">
+          <h1>选个同桌</h1>
+          <div class="cats">
+            <button data-pet="ink" class="cat">
+              <img alt="" /><span
+                ><b>墨爪</b><small>金眼黑猫</small></span
+              ></button
+            ><button data-pet="chestnut" class="cat">
+              <img alt="" /><span><b>栗酥</b><small>奶油缅因</small></span>
+            </button>
+          </div>
+          <p id="note"></p>
+          <details id="coat">
+            <summary>用我的宠物照片配色</summary>
+            <p>
+              上传一张光线自然的正面照，点毛发取主色。角色的眼睛、耳朵和四肢继续实时响应。
+            </p>
+            <div class="row">
+              <label class="file"
+                >选择照片<input
+                  id="photo"
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp" /></label
+              ><label>主色 <input class="color" id="fur" type="color" /></label
+              ><label>眼睛 <input class="color" id="eye" type="color" /></label>
+            </div>
+            <canvas
+              id="sample"
+              hidden
+              width="240"
+              height="160"
+              style="max-width: 100%; margin-top: 8px; cursor: crosshair"
+            ></canvas
+            ><button id="restore">恢复原色</button>
+          </details>
+          <div class="section actions">
+            <button id="snap">拍张透明照</button
+            ><button id="save">导出宠物配色</button
+            ><label class="file" style="text-align: center"
+              >导入宠物配色<input
+                id="load"
+                type="file"
+                accept=".json,application/json"
+            /></label>
+          </div>
+          <p class="tip">
+            两只猫分别记住配色。导出的配色文件可在工作室或桌面伴侣载入。
+          </p>
+          <p id="status" class="status" role="status"></p>
+        </aside>
+      </section>
+    </main>
+    <div class="winbar">
+      <button id="system">跟随系统键鼠</button><button id="switch">换猫</button
+      ><button id="studio">工作室</button
+      ><button id="quit" aria-label="退出">×</button>
+    </div>
+    <script src="vendor/three.min.js"></script>
+    <script src="motion.js"></script>
+    <script src="reference.js"></script>
+    <script src="scene.js"></script>
+    <script src="studio.js"></script>
+  </body>
+</html>
