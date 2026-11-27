@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="你按键，它出爪。试玩三种桌宠画风，捏出你的猫，下载爪边 Pawside。">
+  <meta name="theme-color" content="#f7f1e3">
+  <title>爪边 Pawside · 会跟你一起打字的桌宠</title>
+  <link rel="icon" href="assets/paw.png" type="image/png">
+  <link rel="stylesheet" href="site.css">
+  <script defer src="studio/motion.js"></script>
+  <script defer src="studio/frame-loop.js"></script>
+  <script defer src="studio/looks.js"></script>
+  <script defer src="studio/illustration.js"></script>
+  <script defer src="studio/assets/maine-coon-image.js"></script>
+  <script defer src="studio/legacy-2d.js"></script>
+  <script defer src="studio/pixel.js"></script>
+  <script defer src="studio/drawing.js"></script>
+  <script defer src="play.js"></script>
+</head>
+<body>
+  <header class="site-top shell" id="top">
+    <a href="#top" aria-label="爪边 Pawside 首页" class="brand">
+      <img src="assets/paw.png" width="43" height="43" alt="">
+      <span class="wordmark">PAWSIDE.</span><span class="brand-cn">爪边</span>
+    </a>
+    <nav class="site-nav" aria-label="主导航">
+      <a href="#styles">画风</a>
+      <a href="#workbench">捏脸</a>
+      <a class="button small dark" href="#downloads">下载</a>
+    </nav>
+  </header>
+
+  <main class="shell">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <h1 id="hero-title"><span>敲一下，</span><span class="second-line">猫就动。</span></h1>
+        <p>一只会跟你一起打字的桌宠。<br>挑个画风，敲几下，看看它怎么出爪。</p>
+        <div class="intro-actions">
+          <a class="button primary" href="#downloads">下载桌宠</a>
+          <a class="button plain" href="#workbench">去捏脸</a>
+        </div>
+      </div>
+
+      <div class="playground print-window" id="play">
+        <div class="window-bar">
+          <span class="window-name"><span class="live-dot" aria-hidden="true"></span>实时试玩</span>
+          <label class="cast-picker" hidden>同桌
+            <select id="cast" aria-label="更换试玩角色">
+              <option value="ink">墨爪</option>
+              <option value="silvercoon">银杏</option>
+              <option value="creamcoon">栗酥</option>
+              <option value="mackerel">山椒</option>
+            </select>
+          </label>
+        </div>
+        <div class="play-stage dotted" id="play-stage" data-ink="paper">
+          <div class="stage-corner" aria-live="polite">
+            <strong id="cast-title">银虎斑缅因</strong>
+            <span id="cast-breed">2D</span>
+          </div>
+          <div id="play-canvas" class="canvases" aria-label="桌宠互动。可敲键，或按住猫头来回抚摸。">
+            <img class="play-fallback" src="assets/maine-coon-2d.webp" alt="旧版 2D 银虎斑缅因在键盘前坐着" fetchpriority="high">
+            <canvas aria-hidden="true"></canvas><canvas aria-hidden="true" hidden></canvas>
+          </div>
+          <span id="action-state" class="action-state" aria-live="polite">待机</span>
+        </div>
+        <div class="key-tray" aria-label="虚拟键盘">
+          <div class="key-bank"><button type="button" data-key="KeyA">A</button><button type="button" data-key="KeyS">S</button><button type="button" data-key="KeyD">D</button></div>
+          <div class="key-bank"><button type="button" data-key="KeyJ">J</button><button type="button" data-key="KeyK">K</button><button type="button" data-key="KeyL">L</button></div>
+          <button type="button" class="erase" data-key="Backspace" aria-label="退格，按住试试">⌫ <span>退格</span></button>
+          <button type="button" id="pet-cat" class="pet-cat">摸摸头</button>
+        </div>
+        <p id="play-error" class="feedback" role="status" hidden></p>
+      </div>
+    </section>
+
+    <section class="styles section-rule" id="styles" aria-labelledby="styles-title">
+      <div class="section-heading">
+        <h2 id="styles-title">三种画风</h2>
+      </div>
+      <div class="style-rack" role="group" aria-label="切换试玩画风">
+        <button type="button" class="style-card" data-mode="paper" aria-pressed="true">
+          <span class="card-image dotted"><img src="assets/maine-coon-2d.webp" width="448" height="302" alt="" loading="lazy"></span>
+          <span class="card-caption"><span><strong>2D</strong><small>银虎斑缅因 · 旧版原图</small></span><span class="card-play" aria-hidden="true"></span></span>
+        </button>
+        <button type="button" class="style-card" data-mode="volume" aria-pressed="false">
+          <span class="card-image dotted"><img src="assets/ink-volume.webp" width="448" height="302" alt="" loading="lazy"></span>
+          <span class="card-caption"><span><strong>Pawside 3D</strong><small id="volume-card-pet">墨爪</small></span><span class="card-play" aria-hidden="true"></span></span>
+        </button>
+        <button type="button" class="style-card" data-mode="pixel" aria-pressed="false">
+          <span class="card-image dotted"><img src="assets/creamcoon-pixel.webp" width="448" height="302" alt="" loading="lazy"></span>
+          <span class="card-caption"><span><strong>像素风</strong><small id="pixel-card-pet">栗酥</small></span><span class="card-play" aria-hidden="true"></span></span>
+        </button>
+      </div>
+    </section>
+
+    <section class="workbench section-rule" id="workbench" aria-labelledby="workbench-title">
+      <div class="section-heading">
+        <h2 id="workbench-title">捏一只你的猫</h2>
+        <p>调整会带入完整工作室。</p>
+      </div>
+      <div class="edit-window print-window">
+        <div class="face-panel dotted" id="face-panel" data-ink="volume">
+          <div class="canvases" id="face-canvas">
+            <img class="face-fallback" src="assets/ink-face.webp" alt="墨爪的头部特写" loading="lazy">
+            <canvas aria-hidden="true"></canvas><canvas aria-hidden="true" hidden></canvas>
+          </div>
+        </div>
+        <div class="face-controls">
+          <div class="face-heading">
+            <div><span>正在调整</span><strong id="face-title">墨爪</strong></div>
+            <button class="text-button" type="button" id="reset-face">还原</button>
+          </div>
+          <label class="parameter" for="head">头宽 <output id="head-value" for="head">100%</output></label>
+          <input type="range" id="head" min="82" max="122" value="100">
+          <label class="parameter" for="ear">耳长 <output id="ear-value" for="ear">100%</output></label>
+          <input type="range" id="ear" min="58" max="128" value="100">
+          <label class="parameter coat-input" for="fur">主毛色 <input type="color" id="fur" value="#242631"></label>
+          <a class="button dark" href="studio/?preset=ink&amp;style=volume" id="continue-studio">带着设定进工作室</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="downloads section-rule" id="downloads" aria-labelledby="downloads-title">
+      <div class="section-heading">
+        <h2 id="downloads-title">带它回桌面</h2>
+        <span class="version">v2.4.0</span>
+      </div>
+      <div class="download-board">
+        <a class="download-row" href="downloads/Pawside-Windows-x64.zip">
+          <span class="platform-icon windows" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+          <span class="download-name"><strong>Windows</strong><small>x64 · 便携版，解压运行 Pawside.exe</small></span>
+          <span class="download-action">下载 ZIP <span aria-hidden="true">↓</span></span>
+        </a>
+        <a class="download-row" href="downloads/Pawside-macOS-Apple-Silicon.zip">
+          <span class="platform-icon mac" aria-hidden="true">⌘</span>
+          <span class="download-name"><strong>macOS</strong><small>Apple 芯片 · 解压后双击 Start-Pawside.command</small></span>
+          <span class="download-action">下载 ZIP <span aria-hidden="true">↓</span></span>
+        </a>
+        <a class="download-row" href="downloads/Pawside-Studio.html">
+          <span class="platform-icon brackets" aria-hidden="true">&lt;&gt;</span>
+          <span class="download-name"><strong>离线工作室</strong><small>单文件 HTML，在浏览器里打开</small></span>
+          <span class="download-action">下载 HTML <span aria-hidden="true">↓</span></span>
+        </a>
+        <a class="download-row" href="downloads/Pawside-Source.zip">
+          <span class="platform-icon" aria-hidden="true">#</span>
+          <span class="download-name"><strong>项目源码</strong><small>官网、桌宠、部署脚本</small></span>
+          <span class="download-action">下载 ZIP <span aria-hidden="true">↓</span></span>
+        </a>
+      </div>
+      <details class="install-notes">
+        <summary>启动与权限</summary>
+        <p>完整解压桌面版后再启动。系统键鼠跟随可在桌宠菜单里开启，网页试玩响应当前页面的输入。macOS 可能要求授予辅助功能与输入监控权限。</p>
+      </details>
+    </section>
+  </main>
+
+  <footer class="site-footer shell">
+    <a class="wordmark" href="#top" aria-label="爪边 Pawside，回到页首">PAWSIDE.</a>
+    <a href="studio/">在线工作室</a>
+  </footer>
+</body>
+</html>

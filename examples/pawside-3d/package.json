@@ -1,12 +1,13 @@
 {
   "name": "pawside-three-companion",
-  "version": "1.0.0",
+  "version": "2.4.0",
   "private": true,
-  "description": "Pawside desktop companion and offline Three.js studio",
+  "description": "Pawside customizable desktop pets and offline three-style studio",
   "main": "desktop/main.cjs",
   "scripts": {
     "start": "electron .",
-    "test": "node --test tools/motion.test.cjs",
+    "build:pages": "python3 tools/package-cloudflare.py --pages",
+    "test": "node --test tools/motion.test.cjs tools/looks.test.cjs",
     "reference:check": "node tools/rehearse.cjs",
     "reference:frames": "electron tools/capture.cjs"
   },

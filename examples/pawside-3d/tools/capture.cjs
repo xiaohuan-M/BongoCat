@@ -30,25 +30,29 @@ function verifyKeyContacts(pet) {
   for (const key of PawMotion.layout.values()) {
     motion.reset(0);
     motion.down(key.code, 0.02);
-    for (let frame = 1; frame <= 11; frame++) motion.step(frame / 60);
-    view.render(motion, 11 / 60);
-
     const cap = view.caps.get(key.code);
     const geometry = cap.batch.geometry;
     if (!geometry.boundingBox) geometry.computeBoundingBox();
-    cap.batch.getMatrixAt(cap.index, transform);
-    const bounds = geometry.boundingBox.clone().applyMatrix4(transform);
     const side = motion.paws.findIndex((paw) => paw.code === key.code);
-    const leg = view.cat.arms[side];
-    let clearance = Infinity;
-    for (let i = 0; i < leg.pos.count; i++) {
-      const x = leg.pos.getX(i), z = leg.pos.getZ(i);
-      if (x >= bounds.min.x && x <= bounds.max.x && z >= bounds.min.z && z <= bounds.max.z)
-        clearance = Math.min(clearance, leg.pos.getY(i) - bounds.max.y);
+    const paw = motion.paws[side];
+    const land = paw.start + paw.duration;
+    for (const [phase, t] of [['land', land], ['press', 0.20], ['rebound', 0.24]]) {
+      if (phase === 'rebound') motion.up(key.code, 0.20);
+      motion.step(t);
+      view.render(motion, t);
+      cap.batch.getMatrixAt(cap.index, transform);
+      const bounds = geometry.boundingBox.clone().applyMatrix4(transform);
+      const leg = view.cat.arms[side].pos;
+      let clearance = Infinity;
+      for (let i = 0; i < leg.count; i++) {
+        const x = leg.getX(i), z = leg.getZ(i);
+        if (x >= bounds.min.x && x <= bounds.max.x && z >= bounds.min.z && z <= bounds.max.z)
+          clearance = Math.min(clearance, leg.getY(i) - bounds.max.y);
+      }
+      // About half a pixel in the reference take; allow a little pad compression.
+      if (!(Math.abs(clearance) <= 0.009))
+        throw new Error(pet + ' / ' + key.code + ' / ' + phase + ' sole-to-cap gap: ' + clearance);
     }
-    // About half a pixel in the reference take; allow a little pad compression.
-    if (!(Math.abs(clearance) <= 0.009))
-      throw new Error(pet + ' / ' + key.code + ' sole-to-cap gap: ' + clearance);
   }
 }
 

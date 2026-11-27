@@ -209,6 +209,51 @@ test('key contacts survive same-bank overlap and release after a visible short t
   tick(m, 0.5);
   assert.equal(m.contacts.size, 0);
 });
+test('release returns the paw to a previous held key without generating another strike', () => {
+  const m = new Motion();
+  const first = layout.get('KeyA'), second = layout.get('KeyS');
+  assert.equal(first.side, second.side);
+  m.down(first.code, 0);
+  tick(m, 0.2);
+  m.down(second.code, 0.2);
+  tick(m, 0.41);
+  const paw = m.paws[first.side], serial = m.hitSerial;
+  assert.equal(paw.pos.x, second.x);
+  m.up(second.code, 0.41);
+  tick(m, 0.57);
+  assert.equal(paw.pos.x, first.x);
+  assert.equal(paw.pos.z, first.z);
+  assert.equal(m.keyDepth(first.code, m.t), 1);
+  assert.equal(m.hitSerial, serial);
+  m.up(first.code, 0.57);
+  tick(m, 0.61);
+  const contact = m.keyContact(paw, m.t);
+  assert.equal(contact.weight, 1);
+  assert.ok(contact.depth < 1 && contact.depth > 0);
+  tick(m, 0.78);
+  assert.equal(m.keyContact(paw, m.t), null);
+});
+
+test('space uses alternating ends of the cap, reserving a paw when gripping the mouse', () => {
+  const m = new Motion();
+  const space = layout.get('Space');
+  m.down(space.code, 0);
+  tick(m, 0.19);
+  assert.ok(m.paws[0].pos.x < space.x);
+  m.up(space.code, 0.19);
+  m.down(space.code, 0.27);
+  tick(m, 0.45);
+  assert.ok(m.paws[1].pos.x > space.x);
+  m.up(space.code, 0.45);
+  m.setButtons(1, 0.55);
+  tick(m, 0.69);
+  m.down(space.code, 0.69);
+  tick(m, 0.9);
+  assert.ok(m.paws[0].pos.x < -2);
+  assert.ok(m.paws[1].pos.x > space.x);
+  assert.equal(m.keyContact(m.paws[1], m.t).depth, 1);
+});
+
 test('a sprint followed by quiet lifts the gaze once, new input cancels it', () => {
   const m = typing(0.095, 20);
   tick(m, 2.35);
@@ -241,7 +286,7 @@ test('ears follow a real landing and a paused clock resets transient poses', () 
 test('quiet and sleeping pets render less, input and residual tail motion wake rendering', () => {
   const m = new Motion();
   tick(m, 4);
-  assert.equal(m.idleFrameRate(4), 30);
+  assert.equal(m.idleFrameRate(4), 20);
   tick(m, 30);
   assert.equal(m.idleFrameRate(30), 12);
   m.setButtons(2, 30);
@@ -255,7 +300,7 @@ test('quiet and sleeping pets render less, input and residual tail motion wake r
   tick(m, 38);
   assert.equal(m.idleFrameRate(38), 0);
   tick(m, 44);
-  assert.equal(m.idleFrameRate(44), 30);
+  assert.equal(m.idleFrameRate(44), 20);
 });
 
 test('both profiles complete every timed checkpoint in the reference score', () => {
@@ -305,4 +350,67 @@ test('a second erase escalates, sustained erase persists into mouse motion, rubb
   m.strokeHead(1.42);
   tick(m, 1.7);
   assert.ok(m.nuzzle > 0.7);
+});
+
+test('a live key survives a renderer stall and releases on the original cap', () => {
+  const m = new Motion();
+  m.down('KeyA', 0);
+  m.step(.2);
+  m.step(3.2, true);
+  assert.equal(m.held.has('KeyA'), true);
+  assert.equal(m.keyDepth('KeyA', 3.2), 1);
+  m.up('KeyA', 3.21);
+  m.step(3.4);
+  assert.equal(m.held.size, 0);
+  assert.equal(m.keyDepth('KeyA', 3.4), 0);
+});
+
+test('hover follows independently of hands, typing and the sleep countdown', () => {
+  const m = new Motion('ink', { sleepAfter: 5 });
+  tick(m, 3);
+  assert.equal(m.observeCursor(.8, .6, 3), true);
+  assert.equal(m.observeCursor(.804, .603, 3.01), false);
+  tick(m, 3.3);
+  assert.equal(m.mode, 'idle');
+  assert.ok(m.gaze[0] > .60 && m.gaze[1] > .40);
+  assert.ok(m.cursorLook > .8);
+  assert.equal(m.idleFrameRate(3.3), 28);
+  assert.equal(m.mouseLean, 0);
+  assert.equal(m.lastInput, 0);
+  assert.ok(m.paws.every(paw => paw.code === null));
+
+  m.down('KeyF', 3.35);
+  tick(m, 3.55);
+  assert.equal(m.mode, 'slow');
+  assert.ok(m.cursorLook < .25);
+  assert.notEqual(m.gaze[0], .8);
+  m.up('KeyF', 3.6);
+  m.leaveCursor(3.62);
+  tick(m, 4.45);
+  assert.ok(m.cursorLook < .02);
+  m.setPrivacy(true, 4.5);
+  assert.equal(m.observeCursor(.8, .6, 4.6), false);
+  assert.deepEqual(m.cursor, [0, 0]);
+
+  const sleepy = new Motion('ink', { sleepAfter: 3 });
+  for (let t = .1; t <= 8; t += .1) {
+    sleepy.observeCursor(Math.sin(t * 8), .1, t);
+    sleepy.step(t);
+  }
+  assert.equal(sleepy.lastInput, 0);
+  assert.equal(sleepy.mode, 'sleep');
+  assert.equal(sleepy.idleFrameRate(8), 12);
+});
+
+test('rubbing extends petting only while a captured pointer stays on the head', () => {
+  const m = new Motion();
+  m.beginPetting([0, .2], 1);
+  const firstExpiry = m.nuzzleUntil;
+  assert.equal(m.trackPetting([.07, .2], true, 1.1), false);
+  assert.equal(m.trackPetting([.16, .2], false, 1.2), false);
+  assert.equal(m.trackPetting([.10, .2], true, 1.3), false);
+  assert.equal(m.trackPetting([.02, .2], true, 1.4), true);
+  assert.ok(m.nuzzleUntil > firstExpiry);
+  m.endPetting();
+  assert.equal(m.trackPetting([.18, .2], true, 1.5), false);
 });

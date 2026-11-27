@@ -1,0 +1,1 @@
+Electron and Chromium notices accompany the runtime. Three.js is MIT licensed; see web/vendor/THREE-LICENSE. uiohook-napi and node-gyp-build include their respective MIT notices. The uiohook-napi native addon includes libuiohook (LGPL-3.0-or-later). Corresponding vendored sources and binding.gyp are included alongside the replaceable .node binary.

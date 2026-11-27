@@ -54,9 +54,9 @@ want it again.
 Inspired by [Bongo-Cat-Mver](https://github.com/MMmmmoko/Bongo-Cat-Mver) by
 [MMmmmoko](https://github.com/MMmmmoko).
 
-## Pawside 3D desk companion
+## Pawside desk companion
 
-Open the offline studio or start the standalone desktop companion. Ink Cat and Chestnut can hold and drag mouse buttons, scroll, and type with a free paw. Repeated Backspace makes their tails thump. [Launch instructions](examples/pawside-3d/README.md)
+Choose 2D, 3D, or pixel art in the browser studio or standalone desktop companion. The cats can tap keys, grip the mouse, and react as you type. [Launch instructions](examples/pawside-3d/README.md) · [Deploy from Git on Cloudflare Pages](examples/pawside-3d/DEPLOY.md)
 
 ## Features
 

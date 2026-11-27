@@ -3,23 +3,15 @@
   const $ = (s) => document.querySelector(s),
     $$ = (s) => [...document.querySelectorAll(s)],
     { Motion, clamp, layout } = PawMotion;
+  const { groups, preset, renderStyles, temperaments, normalize, cleanStyle, readFile, skinName, paletteFromFur } = PawLooks;
   const canvas = $('#scene'),
     desktop = window.pawDesktop,
     desk = !!desktop && location.search.includes('desktop');
   document.body.classList.toggle('desk', desk);
-  const clock = () => performance.now() / 1000;
-  const names = {
-    ink: [
-      '墨爪',
-      'Ink Cat',
-      '墨爪侧过身，把一只爪子搭上鼠标。开始打字，它会回头看键盘。按住退格，看它眯起金眼睛，用尾巴拍桌。',
-    ],
-    chestnut: [
-      '栗酥',
-      'Chestnut',
-      '栗酥有耳尖毛、额头纹和蓬松的尾巴。它也会侧身握鼠标、低头找键。按退格时，耳朵向后压，尾尖甩下来。',
-    ],
-  };
+  let switchDuration = 0;
+  const clock = () => performance.now() / 1000 - switchDuration;
+  const names = { ink: '墨爪', chestnut: '栗酥' };
+  const pets = Object.keys(names);
   const states = {
     idle: '待机',
     private: '隐私 · 捂眼',
@@ -33,7 +25,7 @@
     sleep: '打盹',
     mouse: '握鼠标',
   };
-  const backgrounds = { oat: '#f1eee5', sage: '#dce6d5', blue: '#dbe7e9' };
+  const backgrounds = { oat: '#ffda75', sage: '#d4e6ad', blue: '#d7cdfd' };
   function get(key, value) {
     try {
       return JSON.parse(localStorage.getItem('pawside.3d.' + key)) ?? value;
@@ -44,42 +36,61 @@
   function store(key, v) {
     try {
       localStorage.setItem('pawside.3d.' + key, JSON.stringify(v));
-    } catch {}
+      return true;
+    } catch {
+      return false;
+    }
   }
-  function clean(o) {
-    const out = {};
-    for (const k of ['fur', 'shade', 'light', 'stripe', 'eye'])
-      if (/^#[0-9a-f]{6}$/i.test(o?.[k] || '')) out[k] = o[k];
-    return out;
+  function draftOf(value) {
+    return {
+      ...cleanStyle(value),
+      temperament: Object.hasOwn(temperaments, value?.temperament) ? value.temperament : 'calm',
+      name: skinName(value?.name),
+      preset: preset.some(p => p.key === value?.preset) ? value.preset : '',
+    };
   }
-  const pref = get('coats', {}),
-    coats = { ink: clean(pref?.ink), chestnut: clean(pref?.chestnut) },
-    portraits = {};
+  const library = get('skinStudio', {});
+  const oldCoats = get('coats', {});
+  const startPresets = { ink: preset.find(p => p.key === 'ink'), chestnut: preset[0] };
+  function presetDraft(p) { return draftOf({ ...p, preset: p.key }); }
+  const drafts = Object.fromEntries(pets.map(p => [p, library?.drafts?.[p]
+    ? draftOf(library.drafts[p]) : oldCoats?.[p] ? draftOf({coat:oldCoats[p]}) : presetDraft(startPresets[p])]));
+  function readVariants(values) {
+    const result = {};
+    for (const p of preset) if(values?.[p.key]) result[p.key] = draftOf(values[p.key]);
+    return result;
+  }
+  let variants = readVariants(library?.variants);
+  function readSaved(items) {
+    if(!Array.isArray(items)) return [];
+    return items.filter(item=>item && pets.includes(item.pet) && typeof item.key==='string')
+      .map(item=>({...draftOf(item), pet:item.pet, key:item.key,
+        renderStyle:Object.hasOwn(renderStyles,item.renderStyle)?item.renderStyle:'volume'}));
+  }
+  let saved = readSaved(library?.saved);
   const notice = (s) => {
     $('#status').textContent = s;
   };
-  let view;
-  try {
-    view = new PawScene.View(canvas);
-  } catch (e) {
-    $('#fail').hidden = false;
-    $('#fail').textContent =
-      '3D 场景需要 WebGL。请打开浏览器硬件加速后重新载入。';
-    return;
-  }
+  const view = new PawDrawing.StudioView($('#flat-canvas'), $('#volume-canvas'));
   const motion = new Motion();
   let id = 'ink',
     activeScript = null,
     scheduled = [],
     heldPointer = new Map(),
     mousePointer = null,
+    rubPointer = null,
     physical = new Set(),
     review = false,
     lastLabel = '';
   const samples = new Map();
+  let group = groups[0], activeSaved = '';
   let domCover = false,
     remoteCover = false;
   const covered = () => domCover || remoteCover;
+  const frames = PawFrames.createFrameLoop(
+    () => advance(clock()),
+    () => activeScript ? 0 : motion.idleFrameRate(clock())
+  );
   function now() {
     return review ? motion.t : clock();
   }
@@ -88,15 +99,17 @@
     physical.clear();
     heldPointer.clear();
     mousePointer = null;
+    rubPointer = null;
     motion.reset(t);
     if (covered()) motion.setPrivacy(true, t);
+    frames.wake();
   }
   function stop() {
     activeScript = null;
     scheduled = [];
-    $('[data-act=reference]').textContent = '▶ 原片复刻';
+    $('[data-act=reference]').textContent = '键鼠回放';
     $('[data-act=demo]').textContent = '▶ 动作演示';
-    $('[data-act=tempo]').textContent = '▶ 表情对照';
+    $('[data-act=tempo]').textContent = '节奏对照';
   }
   function select(newId, persist = true) {
     if (!Object.hasOwn(names, newId)) newId = 'ink';
@@ -106,23 +119,46 @@
     motion.profile = id;
     view.select(id);
     lastLabel = '';
-    $('#english').textContent = names[id][1];
-    $('#note').textContent = names[id][2];
+    activeSaved = '';
+    applyTemper();
+    syncIdentity();
     $$('[data-pet]').forEach((b) =>
       b.setAttribute('aria-pressed', String(b.dataset.pet === id))
     );
-    $('#fur').value = coats[id].fur || PawScene.palettes[id].fur;
-    $('#eye').value = coats[id].eye || PawScene.palettes[id].eye;
+    refreshEditor();
     $('#sample').hidden = !samples.has(id);
     if (samples.has(id))
       $('#sample').getContext('2d').drawImage(samples.get(id), 0, 0);
     if (persist) store('pet', id);
     notice('');
   }
+  function applyTemper() {
+    const profile=temperaments[view.mode==='paper'?'calm':drafts[id].temperament];
+    motion.profile=view.mode==='paper'?'chestnut':id;
+    motion.sleepAfter=profile.sleepAfter;
+    motion.greetingDuration=profile.greeting;
+    motion.nuzzleDuration=profile.nuzzle;
+    $('#temper').value=drafts[id].temperament;
+  }
+  function basis() {return preset.find(p=>p.key===drafts[id].preset);}
+  function syncIdentity() {
+    if (view.mode==='paper') {
+      $('#english').textContent=Paw2D.pet.name;
+      $('#base-label').textContent='2D';
+      $('#pet-breed').textContent='';
+      return;
+    }
+    const base=basis();
+    $('#english').textContent=drafts[id].name||base?.name||names[id];
+    $('#base-label').textContent=base?.english||(id==='chestnut'?'Chestnut':'Ink');
+    $('#pet-breed').textContent=base?.breed||(id==='chestnut'?'长毛猫':'短毛猫');
+  }
   function resize() {
     const r = canvas.getBoundingClientRect();
-    if (r.width && r.height)
+    if (r.width && r.height) {
       view.resize(Math.round(r.width), Math.round(r.height));
+      frames.wake();
+    }
   }
   const ro = new ResizeObserver(() => {
     if (!review) resize();
@@ -140,6 +176,7 @@
     if (covered()) return;
     stop();
     reset(t);
+    inspect('desk');
     activeScript = action;
     const events = [];
     function tap(code, at, len = 0.1) {
@@ -240,7 +277,7 @@
     $('[data-act=demo]').textContent =
       action === 'demo' ? '■ 停止演示' : '▶ 动作演示';
     if (action === 'reference')
-      $('[data-act=reference]').textContent = '■ 停止复刻';
+      $('[data-act=reference]').textContent = '■ 停止回放';
     if (action === 'tempo') $('[data-act=tempo]').textContent = '■ 停止对照';
   }
   function advance(t) {
@@ -255,7 +292,8 @@
       else if (op === 'hello') motion.greet(at);
       else stop();
     }
-    motion.step(t);
+    const liveHold = !document.hidden && !covered() && (physical.size > 0 || heldPointer.size > 0 || mousePointer !== null);
+    motion.step(t, liveHold);
     view.render(motion, t);
     if (motion.mode !== lastLabel) {
       $('#state').textContent = states[motion.mode];
@@ -282,8 +320,9 @@
       motion.down(code, t, repeat);
     } else {
       physical.delete(code);
-      motion.up(code, t);
+      if (![...heldPointer.values()].includes(code)) motion.up(code, t);
     }
+    frames.wake();
   }
   let systemOn = false;
   function applyCover() {
@@ -369,6 +408,7 @@
       stop();
       reset();
     }
+    watchFrames();
   });
   function point(e) {
     const b = canvas.getBoundingClientRect();
@@ -377,9 +417,6 @@
       1 - ((e.clientY - b.top) / b.height) * 2,
     ];
   }
-  let rubPointer = null,
-    rubDistance = 0,
-    rubPoint = null;
   canvas.addEventListener('pointerdown', (e) => {
     const t = clock();
     interrupt(t);
@@ -390,25 +427,23 @@
       motion.down(hit, t);
       heldPointer.set(e.pointerId, hit);
       canvas.setPointerCapture(e.pointerId);
-    } else if (e.button === 0 && hit === 'head') {
-      motion.greet(t);
+    } else if (e.button === 0 && hit === 'head' && rubPointer === null) {
       rubPointer = e.pointerId;
-      rubPoint = [x, y];
-      rubDistance = 0;
+      motion.beginPetting([x, y], t);
       canvas.setPointerCapture(e.pointerId);
-    } else if (!systemOn && mousePointer === null) {
+    } else if (!systemOn && hit === 'mouse' && mousePointer === null) {
       mousePointer = e.pointerId;
       canvas.setPointerCapture(e.pointerId);
       motion.moveMouse(x, y, t, true);
       motion.setButtons(e.buttons, t);
       e.preventDefault();
     }
+    frames.wake();
   });
   function lift(e) {
     if (e.pointerId === rubPointer) {
       rubPointer = null;
-      rubPoint = null;
-      rubDistance = 0;
+      motion.endPetting();
     }
     const code = heldPointer.get(e.pointerId);
     if (code) {
@@ -420,31 +455,27 @@
       motion.setButtons(0, clock());
       mousePointer = null;
     }
+    frames.wake();
   }
   for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture'])
     canvas.addEventListener(ev, lift);
   canvas.addEventListener('pointermove', (e) => {
-    if (e.pointerId === rubPointer && rubPoint) {
-      const pt = point(e);
-      if (view.hit(...pt) === 'head') {
-        rubDistance += Math.min(
-          0.09,
-          Math.hypot(pt[0] - rubPoint[0], pt[1] - rubPoint[1])
-        );
-        if (rubDistance > 0.12) {
-          motion.strokeHead(clock());
-          rubDistance = 0;
-        }
-      } else rubDistance = 0;
-      rubPoint = pt;
+    const pt = point(e), t = clock();
+    if (e.pointerId === rubPointer) {
+      if (motion.trackPetting(pt, view.hit(...pt) === 'head', t)) frames.wake();
       return;
     }
-    if (activeScript || systemOn || heldPointer.size) return;
-    const t = clock();
-    // Chorded mouse presses/releases arrive as pointermove while any button remains held.
-    if (e.pointerId === mousePointer) motion.setButtons(e.buttons, t);
-    if (e.pointerType !== 'touch') motion.moveMouse(...point(e), t);
+    if (activeScript || systemOn) return;
+    if (e.pointerId === mousePointer) {
+      // Button chords can change while the pointer remains captured.
+      motion.setButtons(e.buttons, t);
+      motion.moveMouse(...pt, t);
+      frames.wake();
+    } else if (e.pointerType !== 'touch' && !e.buttons && motion.observeCursor(...pt, t)) {
+      frames.wake(true);
+    }
   });
+  canvas.addEventListener('pointerleave', () => motion.leaveCursor(clock()));
   if (!desk) canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   canvas.addEventListener(
     'wheel',
@@ -462,6 +493,7 @@
       motion.moveMouse(...point(e), t, true);
       const unit = e.deltaMode === 1 ? 1 / 3 : e.deltaMode === 2 ? 3 : 1 / 80;
       motion.scroll(clamp(e.deltaY * unit, -3, 3), t);
+      frames.wake();
     },
     { passive: false }
   );
@@ -476,6 +508,7 @@
           stop();
           reset(t);
         } else script(b.dataset.act, t);
+        frames.wake();
         canvas.focus();
       })
   );
@@ -490,41 +523,297 @@
   backdrop(get('bg', 'oat'));
   function focus(on) {
     document.body.classList.toggle('focus', on);
-    $('#focus').textContent = on ? '返回工作室 ↙' : '专注视图 ↗';
+    $('#focus').setAttribute('aria-label', on ? '返回工作室' : '专注视图');
+    $('#focus').title = on ? '返回工作室' : '专注视图';
     $('#focus').setAttribute('aria-pressed', String(on));
     canvas.focus();
   }
   $('#focus').onclick = () => focus(!document.body.classList.contains('focus'));
-  function paint() {
-    coats[id] = clean(coats[id]);
-    view.skin(id, coats[id]);
-    store('coats', coats);
-    $('#fur').value = coats[id].fur || PawScene.palettes[id].fur;
-    $('#eye').value = coats[id].eye || PawScene.palettes[id].eye;
+  function inspect(angle) {
+    view.inspect(angle);
+    $('#peek-face').textContent=view.inspection==='desk'?'看正脸':'看全身';
+    for (const button of $$('[data-view]'))
+      button.setAttribute('aria-pressed', String(button.dataset.view === view.inspection));
   }
-  function tint(hex) {
-    const c = new THREE.Color(hex);
-    for (const [k, n] of [
-      ['shade', 0.72],
-      ['light', 1.23],
-      ['stripe', 0.53],
-    ])
-      coats[id][k] = '#' + c.clone().multiplyScalar(n).getHexString();
-    coats[id].fur = hex;
-    paint();
+  for (const button of $$('[data-view]'))
+    button.onclick = () => {
+      inspect(button.dataset.view);
+      advance(now());
+    };
+
+  const dirtyLooks = new Set();
+  let paintTimer = 0, persistTimer = 0;
+  const linkCoat = $('#link-coat');
+  linkCoat.checked = get('linkCoat', true) !== false;
+  linkCoat.onchange = () => store('linkCoat', linkCoat.checked);
+  function writeLooks() {
+    clearTimeout(persistTimer);
+    persistTimer = 0;
+    rememberVariant();
+    return store('skinStudio', { drafts, variants, saved });
   }
-  $('#fur').onchange = (e) => tint(e.target.value);
-  $('#eye').onchange = (e) => {
-    coats[id].eye = e.target.value;
-    paint();
+  function repaint() {
+    clearTimeout(paintTimer);
+    paintTimer = 0;
+    for (const pet of dirtyLooks) view.skin(pet, drafts[pet]);
+    dirtyLooks.clear();
+    advance(now());
+  }
+  function editLook(pet = id, immediate = false) {
+    dirtyLooks.add(pet);
+    if (immediate) repaint();
+    else if (!paintTimer) paintTimer = setTimeout(repaint, 45);
+    clearTimeout(persistTimer);
+    persistTimer = setTimeout(writeLooks, 220);
+  }
+  window.addEventListener('pagehide', () => {
+    if (persistTimer) writeLooks();
+  });
+
+  function button(label) {
+    const element = document.createElement('button');
+    element.type = 'button';
+    element.textContent = label;
+    return element;
+  }
+  function rememberVariant() {
+    for(const pet of pets) {
+      const d=drafts[pet];
+      if(d.preset) variants[d.preset]=draftOf(d);
+    }
+  }
+  function applyPreset(p) {
+    rememberVariant();
+    drafts[p.pet]=variants[p.key]?draftOf(variants[p.key]):presetDraft(p);
+    select(p.pet); editLook(p.pet,true);
+    notice('已选「'+(drafts[p.pet].name||p.name)+'」。');
+  }
+  for (const p of preset) {
+    const option=button(''), tile=document.createElement('span'), portrait=document.createElement('canvas'),
+      copy=document.createElement('span'), title=document.createElement('strong'), breed=document.createElement('small');
+    option.dataset.preset=p.key; option.className='preset-card';
+    tile.className='portrait';tile.style.setProperty('--tile',p.paper);tile.setAttribute('aria-hidden','true');tile.append(portrait);
+    copy.className='preset-copy';title.textContent=p.name;breed.textContent=p.breed;copy.append(title,breed);
+    option.append(tile,copy);option.onclick=()=>applyPreset(p);
+    $('#look-presets').append(option);
+    PawDrawing.portrait(portrait,normalize(p.pet,p),p.pet==='chestnut');
+  }
+  function pane(key) {
+    document.body.classList.toggle('editing',key==='edit');
+    for(const section of $$('[data-panel]')) section.hidden=section.dataset.panel!==key;
+    for(const tab of $$('[data-pane]')) tab.setAttribute('aria-pressed',String(tab.dataset.pane===key));
+  }
+  for(const tab of $$('[data-pane]')) tab.onclick=()=>{
+    if(tab.dataset.pane==='edit' && view.mode==='paper' && !style('volume')) style('pixel');
+    pane(tab.dataset.pane);
+  };
+  $('#open-collection').onclick=()=>{pane('collection');$('#skin-name').focus();};
+  $('#quick-edit').onclick=()=>{
+    if(view.mode==='paper' && !style('volume')) style('pixel');
+    pane('edit');inspect('face');advance(now());
+    if(matchMedia('(max-width:740px)').matches)document.querySelector('.work-grid').scrollIntoView();
+  };
+  $('#peek-face').onclick=()=>{inspect(view.inspection==='desk'?'face':'desk');advance(now());};
+  pane('presets');
+  for(const [key,profile] of Object.entries(temperaments))
+    $('#temper').add(new Option(profile.label,key));
+  $('#temper').onchange=(e)=>{drafts[id].temperament=e.target.value;applyTemper();writeLooks();};
+  function style(mode,persist=true) {
+    const frameTime=now();
+    const ok=view.setStyle(mode);
+    $('#fail').hidden=ok;
+    if(!ok){
+      $('#fail').textContent='Pawside 3D 需要 WebGL。启用浏览器硬件加速后可再次切换。';
+      if(!review)switchDuration=performance.now()/1000-frameTime;
+      notice('当前设备无法打开 Pawside 3D。');
+      return false;
+    }
+    for(const b of $$('[data-style]'))b.setAttribute('aria-pressed',String(b.dataset.style===mode));
+    for(const b of $$('[data-view=angle],[data-view=profile]'))b.hidden=mode!=='volume';
+    const fixed=mode==='paper';
+    $('#catalog-title').textContent=fixed?'2D 原插画':'角色图鉴';
+    $('#catalog-count').hidden=fixed;
+    $('#fixed-art').hidden=!fixed;
+    $('#look-presets').hidden=fixed;
+    $('#quick-edit').lastChild.textContent=fixed?'去 3D 捏脸':'捏捏这张脸';
+    if(fixed && document.body.classList.contains('editing'))pane('presets');
+    if(!fixed)for(const p of preset){
+      const icon=$('[data-preset="'+p.key+'"] canvas');
+      PawDrawing.portrait(icon,normalize(p.pet,p),p.pet==='chestnut',mode);
+    }
+    applyTemper();
+    syncIdentity();
+    inspect(view.inspection);
+    if(persist)store('renderStyle',mode);
+    fields();advance(frameTime);
+    // Shader compilation on the first 3D frame can take longer than the idle-gap reset.
+    if(!review)switchDuration=performance.now()/1000-frameTime;
+    return true;
+  }
+  for(const b of $$('[data-style]'))b.onclick=()=>style(b.dataset.style);
+  $('#mode-next').onclick=()=>{const modes=Object.keys(renderStyles),i=modes.indexOf(view.mode);
+    if(!style(modes[(i+1)%modes.length]))style(modes[(i+2)%modes.length]);};
+  const pixelFields=new Set(('headWidth headHeight headLift eyeWidth eyeHeight eyeSpace eyeLift eyeTilt eyeOpen pupilWidth glintSize eye eyeRight earLength earWidth earSpace earLift earAngle ear muzzleWidth noseWidth noseHeight noseLift whiskerLength whiskerSpread nose whisk bodyWidth bodyHeight shoulders hips pawWidth pawRound tailLength tailWidth tailLift paw pattern patternAmount patternShift bibAmount bibWidth bibHeight blaze muzzleMark sockLeft sockRight tailBands fur shade light stripe muzzle').split(' '));
+  function visible(f){return view.mode==='volume'||(view.mode==="pixel"&&pixelFields.has(f.key));}
+  for (const g of groups) {
+    const tab = button(g.label);
+    tab.dataset.group = g.key;
+    tab.onclick = () => {
+      group = g;
+      fields();
+    };
+    $('#look-tabs').append(tab);
+  }
+  function refreshPreset() {
+    for (const option of $$('[data-preset]'))
+      option.setAttribute('aria-pressed', String(option.dataset.preset === drafts[id].preset));
+  }
+  function meter(f, value) {
+    if (f.unit === '%') return Math.round(value*100) + '%';
+    if (f.unit === '°') return value + '°';
+    const x = Math.round(value*100);
+    return x > 0 ? '+' + x : String(x);
+  }
+  function fields() {
+    const { coat, form } = normalize(id, drafts[id]);
+    const rows = [];
+    if(!group.fields.some(visible))group=groups[0];
+    $('#look-group-title').textContent = group.label;
+    $('#coat-link').hidden = group.key !== 'colors';
+    for (const tab of $$('[data-group]')) {
+      tab.hidden=!groups.find(g=>g.key===tab.dataset.group).fields.some(visible);
+      tab.setAttribute('aria-pressed', String(tab.dataset.group === group.key));
+    }
+    for (const f of group.fields.filter(visible)) {
+      const row = document.createElement('label');
+      row.className = 'look-field';
+      const heading = document.createElement('div');
+      const label = document.createElement('span');
+      label.textContent = f.label;
+      heading.append(label);
+      const isColor = f.kind === 'color';
+      const isRange = f.kind === 'range';
+      const input = document.createElement(f.kind === 'select' ? 'select' : 'input');
+      input.id = 'look-' + f.key;
+      row.htmlFor = input.id;
+      const output = document.createElement('output');
+      if (isRange) {
+        input.type = 'range';
+        input.min = f.min;
+        input.max = f.max;
+        input.step = f.step;
+        output.htmlFor = input.id;
+        output.textContent = meter(f, form[f.key]);
+        heading.append(output);
+      } else if (isColor) {
+        input.type = 'color';
+      } else {
+        for (const [value, name] of f.options) input.add(new Option(name, value));
+      }
+      input.value = isColor ? coat[f.key] : form[f.key];
+      input.oninput = () => {
+        const draft = drafts[id];
+        if (f.key === 'eye' && !draft.coat.eyeRight)
+          draft.coat.eyeRight = normalize(id, draft).coat.eyeRight;
+        if (f.key === 'fur') setFur(draft, input.value);
+        else if (isColor) draft.coat[f.key] = input.value;
+        else draft.form[f.key] = isRange ? Number(input.value) : input.value;
+        if (isRange) output.textContent = meter(f, Number(input.value));
+        refreshPreset();
+        editLook();
+      };
+      row.append(heading, input);
+      rows.push(row);
+    }
+    $('#look-fields').replaceChildren(...rows);
+  }
+  function refreshSaved() {
+    const pick = $('#pick-skin');
+    pick.replaceChildren(new Option(saved.length ? '选择已保存的皮肤' : '还没有已保存的皮肤', ''));
+    for (const look of saved)
+      pick.add(new Option(look.name || names[look.pet], look.key));
+    pick.value = activeSaved;
+    $('#delete-skin').hidden = !activeSaved;
+  }
+  function refreshEditor() {
+    $('#skin-name').value = drafts[id].name;
+    syncIdentity();
+    refreshSaved();
+    refreshPreset();
+    fields();
+  }
+  $('#skin-name').oninput = (e) => {
+    drafts[id].name = skinName(e.target.value);
+    syncIdentity();
+    clearTimeout(persistTimer);
+    persistTimer = setTimeout(writeLooks, 220);
+  };
+  $('#reset-group').onclick = () => {
+    const draft = drafts[id];
+    const base=basis();
+    for (const f of group.fields.filter(visible)) {
+      const key=f.kind==='color'?'coat':'form';
+      if(base?.[key]?.[f.key]!==undefined) draft[key][f.key]=base[key][f.key];
+      else delete draft[key][f.key];
+    }
+    refreshPreset();
+    fields();
+    editLook(id, true);
+    notice('已重置「' + group.label + '」。');
   };
   $('#restore').onclick = () => {
-    coats[id] = {};
-    samples.delete(id);
-    $('#sample').hidden = true;
-    paint();
-    notice('已恢复原色。');
+    drafts[id] = basis()?presetDraft(basis()):draftOf({});
+    activeSaved = '';
+    applyTemper();syncIdentity();
+    refreshEditor();
+    editLook(id, true);
+    notice('已恢复当前猫咪的默认外观。');
   };
+  $('#keep-skin').onclick = () => {
+    const draft = drafts[id];
+    const name = draft.name || names[id] + '的皮肤';
+    const prior = saved.find(p => p.key === activeSaved && p.pet === id && p.name === name);
+    const key = prior?.key || (globalThis.crypto.randomUUID?.() ?? (Date.now() + '-' + Math.random()));
+    const entry = { ...draftOf(draft), name, renderStyle:view.mode, pet: id, key };
+    saved = [...saved.filter(p => p.key !== key), entry];
+    draft.name = name;
+    activeSaved = key;
+    refreshEditor();
+    $('#english').textContent = name;
+    notice(writeLooks() ? '已保存「' + name + '」。' : '本机保存失败，可导出皮肤文件。');
+  };
+  $('#pick-skin').onchange = (e) => {
+    const look = saved.find(p => p.key === e.target.value);
+    if (!look) {
+      activeSaved = '';
+      refreshSaved();
+      return;
+    }
+    drafts[look.pet] = draftOf(look);
+    select(look.pet);
+    style(look.renderStyle);
+    activeSaved = look.key;
+    refreshSaved();
+    editLook(look.pet, true);
+    notice('已载入「' + look.name + '」。');
+  };
+  $('#delete-skin').onclick = () => {
+    const look = saved.find(p => p.key === activeSaved);
+    if (!look || !window.confirm('删除已保存的「' + look.name + '」？')) return;
+    saved = saved.filter(p => p.key !== activeSaved);
+    activeSaved = '';
+    refreshSaved();
+    writeLooks();
+    notice('已删除该收藏。');
+  };
+  function setFur(draft, hex) {
+    const tones = linkCoat.checked ? paletteFromFur(hex) : { fur: hex };
+    Object.assign(draft.coat, tones);
+    for (const [key, value] of Object.entries(tones)) {
+      const swatch = $('#look-' + key);
+      if (swatch && swatch.value !== value) swatch.value = value;
+    }
+  }
   function sample(x, y) {
     const c = $('#sample'),
       g = c.getContext('2d'),
@@ -549,13 +838,17 @@
             .padStart(2, '0')
         )
         .join('');
-    tint(hex);
+    setFur(drafts[id], hex);
+    refreshPreset();
+    editLook();
     notice('已取色，可继续点击照片调整。');
   }
+  let photoRead = 0;
   $('#photo').onchange = async (e) => {
     const file = e.target.files[0],
       pet = id;
     if (!file) return;
+    const sequence = ++photoRead;
     let url;
     try {
       if (
@@ -567,7 +860,7 @@
       url = URL.createObjectURL(file);
       im.src = url;
       await im.decode();
-      if (pet !== id) return;
+      if (pet !== id || sequence !== photoRead) return;
       const c = $('#sample'),
         g = c.getContext('2d'),
         scale = Math.min(c.width / im.width, c.height / im.height);
@@ -590,7 +883,7 @@
       notice(err.message);
     } finally {
       if (url) URL.revokeObjectURL(url);
-      e.target.value = '';
+      if (sequence === photoRead) e.target.value = '';
     }
   };
   $('#sample').onclick = (e) => {
@@ -609,61 +902,76 @@
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 30000);
   }
-  $('#snap').onclick = () =>
-    canvas.toBlob((blob) => {
-      if (blob) download(blob, names[id][0] + '-瞬间.png');
+  $('#snap').onclick = () => {
+    repaint();
+    view.surface.toBlob(blob=>{
+      if(blob)download(blob,(drafts[id].name||names[id])+'-'+renderStyles[view.mode]+'.png');
     });
-  $('#save').onclick = () => {
-    download(
-      new Blob(
-        [
-          JSON.stringify(
-            { format: 'pawside-three', version: 1, pet: id, coat: coats[id] },
-            null,
-            2
-          ),
-        ],
-        { type: 'application/json' }
-      ),
-      names[id][0] + '.pawside.json'
-    );
-    notice('已导出配色，可在另一台设备导入。');
   };
+  $('#save').onclick = () => {
+    const name = drafts[id].name || names[id];
+    const file = { format: 'pawside-three', version: 3, pet: id, name, renderStyle:view.mode,
+      temperament:drafts[id].temperament, preset:drafts[id].preset, ...normalize(id, drafts[id]) };
+    download(new Blob([JSON.stringify(file,null,2)], { type: 'application/json' }), name + '.pawside.json');
+    notice('已导出完整皮肤。');
+  };
+  let fileRead = 0;
   $('#load').onchange = async (e) => {
+    const sequence = ++fileRead, file = e.target.files[0];
+    if (!file) return;
     try {
-      const file = e.target.files[0];
-      if (!file) return;
-      if (file.size > 8192) throw Error();
-      const d = JSON.parse(await file.text());
-      if (
-        d.format !== 'pawside-three' ||
-        d.version !== 1 ||
-        !Object.hasOwn(names, d.pet) ||
-        !d.coat ||
-        Array.isArray(d.coat) ||
-        typeof d.coat !== 'object' ||
-        Object.keys(clean(d.coat)).length !== Object.keys(d.coat).length
-      )
-        throw Error();
-      select(d.pet);
-      coats[id] = clean(d.coat);
-      paint();
-      notice('已导入宠物配色。');
+      if (file.size > 16384) throw Error();
+      const look = readFile(JSON.parse(await file.text()));
+      if (sequence !== fileRead) return;
+      drafts[look.pet] = draftOf(look);
+      select(look.pet);
+      if(look.renderStyle)style(look.renderStyle);
+      editLook(look.pet, true);
+      notice('已导入皮肤，可以继续编辑。');
     } catch {
-      notice('请选择工作室导出的宠物配色 JSON。');
+      if (sequence === fileRead) notice('请选择工作室导出的皮肤 JSON。');
     } finally {
-      e.target.value = '';
+      if (sequence === fileRead) e.target.value = '';
     }
   };
-  for (const p of Object.keys(names))
-    if (Object.keys(coats[p]).length) view.skin(p, coats[p]);
-  select(get('pet', 'ink'), false);
+  const arrival = new URLSearchParams(location.search);
+  const incoming = !desktop && preset.find(p => p.key === arrival.get('preset'));
+  if (incoming) {
+    const fresh = presetDraft(incoming);
+    const fur = arrival.get('fur');
+    if (/^#[\da-f]{6}$/i.test(fur || '')) Object.assign(fresh.coat, paletteFromFur(fur));
+    for (const [param, field] of [['head', 'headWidth'], ['ear', 'earLength']]) {
+      const value = arrival.get(param);
+      if (value && /^\d{2,3}$/.test(value)) fresh.form[field] = Number(value) / 100;
+    }
+    drafts[incoming.pet] = draftOf(fresh);
+  }
+  for (const p of pets)view.skin(p,drafts[p]);
+  select(incoming?.pet || get('pet', 'ink'),false);
   resize();
-  const thumbs = { ink: '@@INK@@', chestnut: '@@CHESTNUT@@' };
-  $$('[data-pet]').forEach((b) => {
-    const src = thumbs[b.dataset.pet];
-    if (src.startsWith('data:')) b.querySelector('img').src = src;
-    else b.querySelector('img').src = 'thumb-' + b.dataset.pet + '.png';
+  const priorStyle=get('renderStyle',null);
+  const requestedStyle = incoming && arrival.get('style');
+  const initialStyle = Object.hasOwn(renderStyles, requestedStyle)
+    ? requestedStyle
+    : priorStyle || (library?.drafts || Object.keys(oldCoats || {}).length ? 'volume' : 'paper');
+  if(!style(initialStyle,false)){
+    style('paper',false);
+    $('#fail').hidden=false;
+    $('#fail').textContent='当前设备已使用 2D。Pawside 3D 需要 WebGL。';
+  }
+  if (!priorStyle && !incoming) store('renderStyle', view.mode);
+  if (incoming && view.mode!=='paper') {
+    pane('edit');
+    inspect('face');
+    advance(now());
+  }
+  Paw2D.ready.then(()=>{
+    if (view.mode==='paper') advance(now());
+  }).catch(()=>{
+    if (view.mode==='paper') {
+      style('pixel',false);
+      notice('2D 图片载入失败，已切到像素风。');
+    }
   });
   if (desktop) {
     desktop.onInput((e) => {
@@ -686,6 +994,7 @@
       if (e.type === 'activity') {
         interrupt(t);
         motion.anonymous(t, e.level);
+        frames.wake();
         return;
       }
       if (e.type === 'reset') {
@@ -697,10 +1006,11 @@
         interrupt(t);
         if (e.type === 'buttons') motion.setButtons(e.mask, t);
         else motion.scroll(e.steps, t);
+        frames.wake();
         return;
       }
       if (e.type === 'mouse') {
-        motion.moveMouse(e.x, e.y, t, e.click);
+        if (motion.moveMouse(e.x, e.y, t, e.click)) frames.wake();
         return;
       }
       key(e.code, e.type === 'down', e.repeat, t);
@@ -708,25 +1018,39 @@
     $('#system').onclick = () => desktop.toggleInput();
     $('#studio').onclick = () => desktop.studio();
     $('#quit').onclick = () => desktop.quit();
-    $('#switch').onclick = () => select(id === 'ink' ? 'chestnut' : 'ink');
-    window.addEventListener('storage', (e) => {
-      if (e.key === 'pawside.3d.pet') select(get('pet', 'ink'), false);
-      if (e.key === 'pawside.3d.coats') {
-        const v = get('coats', {});
-        for (const p of Object.keys(names)) {
-          coats[p] = clean(v?.[p]);
-          view.skin(p, coats[p]);
+    $('#switch').onclick=()=>{
+      if(view.mode==='paper' && !style('volume'))style('pixel');
+      const i=preset.findIndex(p=>p.key===drafts[id].preset);
+      applyPreset(preset[(i+1)%preset.length]);
+    };
+    window.addEventListener('storage', e=>{
+      if(e.key==='pawside.3d.renderStyle'){
+        const next=get('renderStyle','paper');if(next!==view.mode)style(next,false);
+      }
+      if(e.key==='pawside.3d.pet'){
+        const next=get('pet','ink');if(next!==id)select(next,false);
+      }
+      if(e.key==='pawside.3d.skinStudio'){
+        const next=get('skinStudio',{});
+        variants=readVariants(next.variants);saved=readSaved(next.saved);
+        for(const p of pets){
+          const fresh=draftOf(next.drafts?.[p]);
+          if(JSON.stringify(fresh)!==JSON.stringify(drafts[p])){
+            drafts[p]=fresh;view.skin(p,fresh);
+          }
         }
-        view.select(id);
+        applyTemper();syncIdentity();refreshEditor();advance(now());
       }
     });
   }
   // Deterministic film uses this same scene and input schedule, including native/keyboard handlers above.
   globalThis.pawReview = {
-    begin(p, w, h, action = 'demo') {
+    begin(p, w, h, action = 'demo', renderStyle = 'volume') {
       if (covered()) return false;
       review = true;
+      watchFrames();
       select(p, false);
+      if(!style(renderStyle,false))return false;
       view.resize(w, h, 1);
       motion.reset(0);
       script(action, 0);
@@ -741,7 +1065,8 @@
     },
     state() {
       return {
-        id,
+        id, renderStyle:view.mode, preset:drafts[id].preset, temperament:drafts[id].temperament,
+        held:[...motion.held.keys()], appearance:normalize(id,drafts[id]), script:activeScript,
         mode: motion.mode,
         kps: motion.kps,
         rage: motion.rage,
@@ -758,24 +1083,15 @@
         afterglow: motion.pique,
         protected: motion.privacy,
         nuzzle: motion.nuzzle,
+        gaze: [...motion.gaze],
+        cursorLook: motion.cursorLook,
         driver: THREE.REVISION,
       };
     },
-    view,
+    get view(){return view.active;},
   };
-  let nextIdleFrame = 0;
-  function loop() {
-    if (!review) {
-      const t = clock();
-      const fps = activeScript ? 0 : motion.idleFrameRate(t);
-      if (!fps || t + 0.001 >= nextIdleFrame) {
-        advance(t);
-        const interval = fps ? 1 / fps : 0;
-        const late = t - nextIdleFrame;
-        nextIdleFrame = fps ? t + interval - (Math.max(0, late) % interval) : t;
-      }
-    }
-    requestAnimationFrame(loop);
+  function watchFrames() {
+    frames.setEnabled(!review && !document.hidden);
   }
-  loop();
+  watchFrames();
 })();

@@ -69,11 +69,28 @@
       edge -= pitch * w;
     });
   });
+  const paperDesk = { center: .28, scale: .87 };
+  const paperLayout = new Map([...layout.values()].map(key => [key.code, {
+    ...key,
+    x: paperDesk.center - (key.x - .42) * paperDesk.scale,
+    width: key.width * paperDesk.scale,
+    side: 1 - key.side,
+  }]));
   const V = (x, y, z) => ({ x, y, z }),
     rest = [V(-0.47, 0.123, 0.91), V(0.27, 0.123, 0.89)];
+  const keyPalmHeight = 0.239;
+  const mouseX = (side, compact) => compact
+    ? paperDesk.center + (side ? 2.39 : -2.39)
+    : side ? 3.16 : -2.32;
   class Motion {
-    constructor(profile = 'ink') {
+    constructor(profile = 'ink', { mouseSide = 0, sleepAfter = 25, compact = false } = {}) {
       this.profile = profile;
+      this.mouseSide = mouseSide;
+      this.sleepAfter = sleepAfter;
+      this.greetingDuration = 1.65;
+      this.nuzzleDuration = .85;
+      this.compact = compact;
+      this.layout = compact ? paperLayout : layout;
       this.reset(0);
     }
     reset(t) {
@@ -92,6 +109,8 @@
       this.anonStart = t;
       this.nuzzle = 0;
       this.nuzzleUntil = -100;
+      this.petTrail = null;
+      this.petDistance = 0;
       this.lastErase = -100;
       this.grab = 0;
       this.mouseUntil = -1;
@@ -116,6 +135,7 @@
       this.scrollSign = 0;
       this.wheelTarget = this.wheelAngle = 0;
       this.lastSide = -1;
+      this.lastSpaceSide = 1;
       this.sideCount = 0;
       this.balance = 0;
       this.hunt = 0;
@@ -128,6 +148,9 @@
       this.hits = [];
       this.hitSerial = 0;
       this.focus = [0, 0];
+      this.cursor = [0, 0];
+      this.cursorAt = -Infinity;
+      this.cursorLook = 0;
       this.gaze = [0, 0];
       this.head = [0, 0];
       this.paws = rest.map((pos) => ({
@@ -139,6 +162,7 @@
         linger: 0,
         code: null,
         lift: 0.24,
+        returning: false,
       }));
     }
     setPrivacy(on, t) {
@@ -154,21 +178,61 @@
       this.anonUntil = t + 0.52;
       this.lastInput = t;
     }
+    tapSide(side, t) {
+      if (this.privacy) return;
+      const p = this.paws[this.buttons || t < this.mouseUntil ? 1 - this.mouseSide : side];
+      p.from = { ...p.pos };
+      p.dest = V(p === this.paws[0] ? -.52 : .92, .27, 1.40);
+      p.start = this.lastInput = t;
+      p.duration = .105;
+      p.linger = t + .17;
+      p.code = null;
+      p.lift = .25;
+    }
     strokeHead(t) {
       if (this.privacy) return;
-      this.nuzzleUntil = t + 0.85;
+      this.nuzzleUntil = t + this.nuzzleDuration;
       this.greet(t);
     }
-    moveMouse(x, y, t, click = false) {
+    beginPetting(point, t) {
       if (this.privacy) return;
-      if (!Number.isFinite(x + y)) return;
+      this.petTrail = point;
+      this.petDistance = 0;
+      this.strokeHead(t);
+    }
+    trackPetting(point, onHead, t) {
+      if (!this.petTrail || this.privacy) return false;
+      const dx = point[0] - this.petTrail[0], dy = point[1] - this.petTrail[1];
+      this.petTrail = point;
+      this.petDistance = onHead ? this.petDistance + Math.min(.08, Math.hypot(dx, dy)) : 0;
+      if (this.petDistance < .115) return false;
+      this.strokeHead(t);
+      this.petDistance = 0;
+      return true;
+    }
+    endPetting() {
+      this.petTrail = null;
+      this.petDistance = 0;
+    }
+    observeCursor(x, y, t) {
+      if (this.privacy || !Number.isFinite(x + y)) return false;
+      if (t - this.cursorAt < .28 && Math.hypot(x - this.cursor[0], y - this.cursor[1]) < .014) return false;
+      this.cursor = [clamp(x, -1, 1), clamp(y, -1, 1)];
+      this.cursorAt = t;
+      return true;
+    }
+    leaveCursor(t) {
+      this.cursorAt = Math.min(this.cursorAt, t - .53);
+    }
+    moveMouse(x, y, t, click = false) {
+      if (this.privacy || !Number.isFinite(x + y)) return false;
       if (
         !click &&
         this.lastMouse &&
         Math.abs(x - this.lastMouse[0]) + Math.abs(y - this.lastMouse[1]) <
           0.006
       )
-        return;
+        return false;
       if (this.lastMouse && t - this.lastMouseAt < 0.25) {
         const travel = Math.hypot(x - this.lastMouse[0], y - this.lastMouse[1]);
         if (
@@ -182,6 +246,7 @@
       this.lastMouseAt = t;
       this.lastInput = t;
       this.focus = [clamp(x, -1, 1), clamp(y, -1, 1)];
+      return true;
     }
     setButtons(mask, t) {
       if (this.privacy) return;
@@ -208,13 +273,24 @@
     }
     greet(t) {
       if (this.privacy) return;
-      this.helloUntil = t + 1.65;
+      this.helloUntil = t + this.greetingDuration;
       this.lastInput = t;
     }
     rate(t) {
       while (this.timestamps.length && t - this.timestamps[0] >= 1.25)
         this.timestamps.shift();
       return this.timestamps.length / 1.25;
+    }
+    aimAtKey(paw, key, side, t, duration, lift) {
+      const offset = key.code === 'Space' ? key.width * (side ? 0.21 : -0.21) : 0;
+      paw.from = { ...paw.pos };
+      paw.dest = V(key.x + offset, keyPalmHeight, key.z);
+      paw.start = t;
+      paw.duration = duration;
+      paw.lift = lift;
+      paw.code = key.code;
+      paw.linger = t + duration + 0.058;
+      paw.returning = false;
     }
     strike(side, key, t, rage = false) {
       const p = this.paws[side];
@@ -223,14 +299,9 @@
           ? Math.min(5, this.sideCount + 1)
           : 1;
       this.lastSide = side;
-      p.from = { ...p.pos };
-      p.dest = V(key.x, 0.239, key.z);
-      p.start = t;
       const speed = clamp(this.rate(t) / 8);
-      p.duration = rage ? 0.074 : mix(0.11, 0.067, speed);
-      p.lift = rage ? 0.55 : mix(0.39, 0.15, speed);
-      p.code = key.code;
-      p.linger = t + p.duration + 0.058;
+      this.aimAtKey(p, key, side, t, rage ? 0.074 : mix(0.11, 0.067, speed),
+        rage ? 0.55 : mix(0.39, 0.15, speed));
       const at = t + p.duration;
       const previous = this.contacts.get(key.code);
       this.contacts.set(key.code, {
@@ -247,7 +318,7 @@
     }
     down(code, t, repeat = false) {
       if (this.privacy) return;
-      const k = layout.get(code);
+      const k = this.layout.get(code);
       if (!k) return;
       if (this.held.has(code) || repeat) {
         if (code === 'Backspace' && this.held.has(code)) {
@@ -256,7 +327,6 @@
         }
         return;
       }
-      this.held.set(code, t);
       this.lastInput = this.lastStrike = t;
       if (code.startsWith('Shift')) {
         if (t - this.lastShift < 0.42) {
@@ -280,7 +350,10 @@
         this.lastRepeat = t;
       }
       if (!this.buttons && t - this.lastMouseAt > 0.24) this.mouseUntil = t;
-      const side = (this.buttons || this.mouseUntil > t) && !rage ? 1 : k.side;
+      let side = k.side;
+      if ((this.buttons || this.mouseUntil > t) && !rage) side = 1 - this.mouseSide;
+      else if (code === 'Space') side = this.lastSpaceSide = 1 - this.lastSpaceSide;
+      this.held.set(code, { at: t, side });
       this.strike(side, k, t, rage);
       this.focus = [k.x / 2, -0.72];
     }
@@ -297,6 +370,13 @@
       const down = ease((t - c.at) / 0.021);
       return down * (1 - ease((t - c.released) / 0.086));
     }
+    keyContact(paw, t) {
+      if (this.privacy || !paw.code) return null;
+      const { pos, dest } = paw;
+      const distance = Math.hypot(pos.x - dest.x, pos.y - dest.y, pos.z - dest.z);
+      const weight = 1 - ease((distance - 0.018) / 0.14);
+      return weight > 0 ? { weight, depth: this.keyDepth(paw.code, t) } : null;
+    }
     idleFrameRate(t) {
       if (
         this.held.size ||
@@ -305,10 +385,14 @@
         t < this.tailUntil + 0.6
       )
         return 0;
-      return this.sleep > 0.97 ? 12 : 30;
+      if (this.sleep > .97 || this.privacy) return 12;
+      if (this.cursorLook > .02 || (this.sleep < .35 && t - this.cursorAt < .6)) return 28;
+      return 20;
     }
-    step(t) {
-      if (t < this.t || t - this.t > 2.5) {
+    step(t, inputStillHeld = false) {
+      // The studio confirms live key and pointer holds across a slow renderer switch.
+      // Blur, visibility loss and privacy entry still perform an explicit reset.
+      if (t < this.t || (t - this.t > 2.5 && !inputStillHeld)) {
         const protectedField = this.privacy;
         this.reset(t);
         this.privacy = protectedField;
@@ -344,12 +428,12 @@
       this.sleep = smooth(
         this.sleep,
         !this.held.size && !this.buttons
-          ? ease((t - this.lastInput - 25) / 2.5)
+          ? ease((t - this.lastInput - this.sleepAfter) / 2.5)
           : 0,
         5,
         dt
       );
-      const heldErase = this.held.get('Backspace');
+      const heldErase = this.held.get('Backspace')?.at;
       if (heldErase !== undefined && t - heldErase >= 0.28) {
         this.frustration = Math.max(
           this.frustration,
@@ -362,12 +446,8 @@
         t - heldErase >= 0.3 &&
         t - this.lastRepeat > 0.166
       ) {
-        this.strike(
-          layout.get('Backspace').side,
-          layout.get('Backspace'),
-          t,
-          true
-        );
+        const erase = this.layout.get('Backspace');
+        this.strike(erase.side, erase, t, true);
         this.lastRepeat = t;
         this.rageUntil = t + 0.75;
         this.tailUntil = Math.max(
@@ -477,9 +557,17 @@
         : 0;
       this.lookup = smooth(this.lookup, lift, lift > this.lookup ? 20 : 12, dt);
       const busy = active ? this.drive : 0;
+      const heldBySide = [null, null];
+      for (const [code, { side }] of this.held) heldBySide[side] = this.layout.get(code);
       for (let i = 0; i < 2; i++) {
-        const p = this.paws[i],
-          u = clamp((t - p.start) / p.duration);
+        const p = this.paws[i];
+        const onMouse = pointer && i === this.mouseSide;
+        const heldKey = onMouse ? null : heldBySide[i];
+        if (heldKey && t >= p.linger && (p.returning || p.code !== heldKey.code))
+          this.aimAtKey(p, heldKey, i, t, 0.105, 0.21);
+        const u = clamp((t - p.start) / p.duration);
+        const release = this.contacts.get(p.code)?.released ?? -Infinity;
+        const rebound = !heldKey && !onMouse && release < Infinity && t < release + 0.055;
         if (u < 1) {
           const a = ease(u);
           p.pos = V(
@@ -489,10 +577,11 @@
           );
         } else if (
           t < p.linger ||
-          (p.code && this.held.has(p.code) && !(pointer && i === 0))
+          heldKey?.code === p.code || rebound
         ) {
           p.pos = { ...p.dest };
         } else {
+          p.returning = true;
           const a = rest[i];
           const hover = clamp((0.61 - (t - this.lastStrike)) / 0.31);
           let point = V(
@@ -500,12 +589,12 @@
             a.y + (0.73 - 0.2 * busy) * hover,
             a.z + 0.19 * hover
           );
-          if (pointer && i === 0) {
+          if (onMouse) {
             const [left, right, middle] = this.press;
             const rolling =
               t < this.scrollUntil ? Math.sin(this.wheelAngle * 3) * 0.052 : 0;
             point = V(
-              -2.32 + this.mouseOffset[0] + 0.14 * (left - right),
+              mouseX(this.mouseSide, this.compact) + this.mouseOffset[0] + 0.14 * (left - right),
               0.32 - 0.085 * Math.max(left, right, middle),
               1.81 + this.mouseOffset[1] + 0.11 * middle + rolling
             );
@@ -550,8 +639,13 @@
         mix(target[0], 0, this.lookup),
         mix(target[1], 0.96, this.lookup),
       ];
+      // Passive cursor tracking leaves the desk, paws, and sleep timer alone.
+      const following = !anonymous && !active && !pointer && this.sleep < .35
+        ? (1 - ease((t - this.cursorAt - .50) / .72)) * (1 - ease(this.sleep / .35)) * (1 - .82 * this.lookup)
+        : 0;
+      this.cursorLook = smooth(this.cursorLook, following, following > this.cursorLook ? 15 : 8, dt);
       for (let i = 0; i < 2; i++) {
-        this.gaze[i] = smooth(this.gaze[i], f[i], 18, dt);
+        this.gaze[i] = smooth(this.gaze[i], mix(f[i], this.cursor[i], following * .92), 18, dt);
         this.head[i] = smooth(this.head[i], this.gaze[i], 6, dt);
       }
       this.mode = anonymous
@@ -576,7 +670,7 @@
       return this;
     }
   }
-  const api = { Motion, layout, clamp, ease, mix };
+  const api = { Motion, layout, paperLayout, paperDesk, clamp, ease, mix, mouseX, keyPalmHeight };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.PawMotion = api;
 })(globalThis);

@@ -50,9 +50,9 @@ BongoCat 是一款面向 Windows 和 macOS 的桌面陪伴应用。一只 Live2D
 
 灵感来自 [MMmmmoko](https://github.com/MMmmmoko) 的 [Bongo-Cat-Mver](https://github.com/MMmmmoko/Bongo-Cat-Mver)。
 
-## 爪边三维桌宠
+## 爪边桌宠
 
-可在浏览器直接打开三维工作室，或启动独立置顶桌面伴侣。墨爪和栗酥会分爪操作鼠标与键盘。左右键可以独立长按，滚轮可双向拨动，连续退格时猫会锤键、拍尾。[打开说明](examples/pawside-3d/README.md)
+浏览器工作室与独立置顶桌宠支持 2D、3D 和像素风。猫会按键、握鼠标，并随打字节奏改变动作。[启动说明](examples/pawside-3d/README.md) · [Cloudflare Pages 自动部署](examples/pawside-3d/DEPLOY.md)
 
 ## 功能介绍
 

@@ -1,538 +1,69 @@
 <!doctype html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>爪边 Pawside · 三维桌宠</title>
-    <style>
-      :root {
-        --paper: #faf7ed;
-        --ink: #292f28;
-        --muted: #656c61;
-        --line: #cfd2c1;
-        --stage: #f3e5cd;
-        --green: #435844;
-      }
-      * {
-        box-sizing: border-box;
-      }
-      body {
-        margin: 0;
-        background: var(--paper);
-        color: var(--ink);
-        font:
-          15px/1.55 'PingFang SC',
-          'Microsoft YaHei',
-          system-ui,
-          sans-serif;
-      }
-      main {
-        max-width: 1320px;
-        margin: auto;
-        padding: 25px clamp(16px, 4vw, 60px) 40px;
-      }
-      header,
-      .toolbar,
-      .under,
-      .chips,
-      .row,
-      .stats,
-      .brand {
-        display: flex;
-        align-items: center;
-      }
-      header,
-      .under,
-      .toolbar {
-        justify-content: space-between;
-      }
-      header {
-        padding-bottom: 15px;
-        border-bottom: 1px solid var(--line);
-      }
-      .brand {
-        gap: 10px;
-        line-height: 1;
-      }
-      .brand b {
-        font:
-          700 30px 'Songti SC',
-          serif;
-      }
-      .brand i,
-      .en {
-        font:
-          italic 22px Georgia,
-          serif;
-        color: #787852;
-      }
-      header > span {
-        color: var(--muted);
-        font-size: 12px;
-      }
-      section.layout {
-        margin-top: 23px;
-        display: grid;
-        grid-template-columns: minmax(0, 1.9fr) minmax(275px, 0.82fr);
-        gap: clamp(20px, 4vw, 54px);
-      }
-      .stage {
-        position: relative;
-        overflow: hidden;
-        background:
-          radial-gradient(ellipse at 28% 23%, #fff8e94a, transparent 66%),
-          var(--stage);
-        border: 1px solid #cfc7af;
-        border-radius: 18px;
-      }
-      .stage canvas {
-        width: 100%;
-        aspect-ratio: 1.42;
-        display: block;
-        touch-action: none;
-        outline: none;
-      }
-      .stage canvas:focus-visible {
-        outline: 2px solid #7a865b;
-        outline-offset: -3px;
-      }
-      .scene-title {
-        pointer-events: none;
-        position: absolute;
-        top: 13px;
-        left: 17px;
-        font:
-          italic 17px Georgia,
-          serif;
-        color: #665d49;
-      }
-      .stats {
-        position: absolute;
-        bottom: 12px;
-        left: 15px;
-        gap: 7px;
-        pointer-events: none;
-      }
-      .stats > * {
-        padding: 3px 10px;
-        background: #fffaf0dd;
-        border: 1px solid #ccc4ae;
-        border-radius: 16px;
-        font:
-          12px/1.5 ui-monospace,
-          'PingFang SC',
-          monospace;
-      }
-      .stats .hot {
-        background: #efd1bc;
-        color: #8b3a31;
-      }
-      .under {
-        margin: 9px 0 13px;
-      }
-      .chips,
-      .row,
-      .toolbar {
-        gap: 7px;
-        flex-wrap: wrap;
-      }
-      button,
-      .file {
-        font: inherit;
-        font-size: 13px;
-        color: inherit;
-        background: #fffdf6;
-        border: 1px solid #bfc4b2;
-        border-radius: 8px;
-        padding: 8px 12px;
-        cursor: pointer;
-      }
-      button:hover,
-      .file:hover {
-        background: #edf0e4;
-      }
-      button:focus-visible,
-      .file:focus-within,
-      summary:focus-visible {
-        outline: 2px solid #748360;
-        outline-offset: 2px;
-      }
-      button:disabled {
-        opacity: 0.55;
-      }
-      .mainbtn {
-        background: var(--green);
-        border-color: var(--green);
-        color: #fff;
-      }
-      .mainbtn:hover {
-        background: #34503b;
-      }
-      button[data-act='rage'] {
-        border-color: #cda997;
-        color: #84483d;
-        background: #faf0e4;
-      }
-      .under button {
-        background: transparent;
-      }
-      .swatch {
-        width: 24px;
-        height: 24px;
-        border-radius: 50%;
-        padding: 3px;
-        background: var(--c) !important;
-        background-clip: content-box !important;
-        border: 1px solid transparent;
-      }
-      .swatch[aria-pressed='true'] {
-        border-color: #5a634b;
-      }
-      .quiet {
-        color: var(--muted);
-        font-size: 12px;
-      }
-      .tip {
-        font-size: 12px;
-        color: var(--muted);
-        margin: 9px 0;
-      }
-      .side h1 {
-        font:
-          bold 34px/1.2 'Songti SC',
-          Georgia,
-          serif;
-        margin: 0 0 15px;
-      }
-      .cats {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 8px;
-      }
-      .cat {
-        padding: 8px 5px;
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        text-align: left;
-      }
-      .cat img {
-        width: 48px;
-        height: 48px;
-        object-fit: contain;
-      }
-      .cat b,
-      .cat small {
-        display: block;
-      }
-      .cat b {
-        font-size: 15px;
-      }
-      .cat small {
-        font-size: 11px;
-        color: var(--muted);
-      }
-      .cat[aria-pressed='true'] {
-        background: #edf1e4;
-        border-color: #596e51;
-        box-shadow: inset 0 0 0 1px #596e51;
-      }
-      .side p {
-        color: var(--muted);
-        font-size: 13px;
-        line-height: 1.75;
-      }
-      details,
-      .section {
-        margin-top: 16px;
-        border-top: 1px solid var(--line);
-        padding-top: 15px;
-      }
-      summary {
-        font-size: 14px;
-        font-weight: 600;
-        cursor: pointer;
-      }
-      .file {
-        display: inline-block;
-      }
-      .file input {
-        position: absolute;
-        width: 1px;
-        height: 1px;
-        opacity: 0;
-      }
-      .actions {
-        display: grid;
-        gap: 8px;
-      }
-      .actions > button {
-        width: 100%;
-      }
-      .status {
-        min-height: 1.5em;
-      }
-      .back {
-        padding: 4px 0;
-        border: 0;
-      }
-      .focus .side,
-      .focus header {
-        display: none;
-      }
-      .focus .layout {
-        grid-template-columns: minmax(0, 920px);
-        justify-content: center;
-      }
-      .focus .stage canvas {
-        max-height: 72vh;
-      }
-      .desk {
-        background: transparent !important;
-        overflow: hidden;
-      }
-      .desk main {
-        padding: 0;
-      }
-      .desk .layout {
-        margin: 0;
-        display: block;
-      }
-      .desk header,
-      .desk .side,
-      .desk .under,
-      .desk .chips,
-      .desk .tip,
-      .desk .stats,
-      .desk .scene-title,
-      .desk #status {
-        display: none;
-      }
-      .desk .stage {
-        background: transparent;
-        border: 0;
-        border-radius: 0;
-      }
-      .desk .stage canvas {
-        width: 100vw;
-        height: 100vh;
-      }
-      .desk .winbar {
-        position: fixed;
-        z-index: 5;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 30px;
-        display: flex;
-        align-items: center;
-        justify-content: flex-end;
-        gap: 4px;
-        -webkit-app-region: drag;
-        opacity: 0;
-      }
-      .desk:hover .winbar,
-      .desk .winbar:focus-within {
-        opacity: 1;
-      }
-      .winbar {
-        display: none;
-      }
-      .winbar button {
-        -webkit-app-region: no-drag;
-        padding: 3px 7px;
-        font-size: 11px;
-      }
-      .color {
-        border: 0;
-        width: 30px;
-        height: 29px;
-        background: none;
-        vertical-align: middle;
-      }
-      .failed {
-        position: absolute;
-        inset: 18%;
-        padding: 14px;
-        background: #fffaed;
-        overflow: auto;
-        font-size: 14px;
-      }
-      [hidden] {
-        display: none !important;
-      }
-      @media (max-width: 760px) {
-        main {
-          padding: 15px 14px 26px;
-        }
-        .layout,
-        section.layout {
-          display: flex;
-          flex-direction: column;
-          gap: 22px;
-          margin-top: 15px;
-        }
-        .stage canvas {
-          aspect-ratio: 1.28;
-        }
-        .side h1 {
-          font-size: 27px;
-        }
-        .cat {
-          gap: 12px;
-        }
-        .scene-title {
-          font-size: 13px;
-        }
-        .stats {
-          bottom: 8px;
-          left: 9px;
-        }
-        .chips {
-          gap: 5px;
-        }
-        .chips button {
-          padding: 7px 10px;
-        }
-        .desk .layout {
-          margin: 0;
-        }
-      }
-      .input-check{margin-top:12px;color:var(--ink);font:inherit}
-      .input-check summary{cursor:pointer;font-size:.91rem}
-      .input-check label,.input-check small{display:block;margin:8px 0}
-      .input-check input{max-width:100%;padding:6px 9px;border:1px solid #a8ad9e;border-radius:7px;background:#fffdf5;color:#242c26}
-    </style>
-  </head>
-  <body>
-    <main>
-      <header>
-        <div class="brand"><b>爪边</b><i>Pawside</i></div>
-        <span>三维桌宠工作室</span>
-      </header>
-      <section class="layout">
-        <div>
-          <div class="stage">
-            <span class="scene-title" id="english">Ink Cat</span
-            ><canvas
-              id="scene"
-              tabindex="0"
-              aria-label="猫与键盘。按键或点键帽，点猫头打招呼。"
-            ></canvas>
-            <div class="stats">
-              <span id="state" role="status">待机</span
-              ><span id="speed">0.0 键 / 秒</span>
-            </div>
-            <div class="failed" id="fail" hidden></div>
-          </div>
-          <div class="under">
-            <div class="row" aria-label="场景底色">
-              <button
-                class="swatch"
-                data-bg="oat"
-                style="--c: #f1eee5"
-                aria-label="暖灰底色"
-              ></button
-              ><button
-                class="swatch"
-                data-bg="sage"
-                style="--c: #bfcfb9"
-                aria-label="鼠尾草底色"
-              ></button
-              ><button
-                class="swatch"
-                data-bg="blue"
-                style="--c: #bad2db"
-                aria-label="雾蓝底色"
-              ></button>
-            </div>
-            <button id="focus" class="back quiet" aria-pressed="false">
-              专注视图 ↗
-            </button>
-          </div>
-          <div class="chips">
-            <button class="mainbtn" data-act="reference">▶ 原片复刻</button
-            ><button data-act="tempo">▶ 表情对照</button
-            ><button data-act="demo">▶ 动作演示</button
-            ><button data-act="hands">键鼠合奏</button
-            ><button data-act="mouse">握鼠标</button
-            ><button data-act="slow">慢敲</button
-            ><button data-act="steady">连打</button
-            ><button data-act="fast">飞速打字</button
-            ><button data-act="rage">⌫ 退格暴走</button
-            ><button data-act="hello">摸摸头</button>
-          </div>
-          <details class="input-check">
-            <summary>试试普通输入和密码保护</summary>
-            <label>普通试打 <input id="try-text" type="text" autocomplete="off" placeholder="随手打几个字"></label>
-            <label>隐私试打 <input id="try-private" type="password" autocomplete="off" data-private placeholder="只用测试字符"></label>
-            <small>聚焦隐私框时，两只前爪捂眼。离开后清空测试框。</small>
-          </details>
-          <p class="tip">
-            在画布空处按住鼠标再打字，或滚动滚轮。点键帽可试单键，按住退格看它锤键。
-          </p>
-        </div>
-        <aside class="side">
-          <h1>选个同桌</h1>
-          <div class="cats">
-            <button data-pet="ink" class="cat">
-              <img alt="" /><span
-                ><b>墨爪</b><small>金眼黑猫</small></span
-              ></button
-            ><button data-pet="chestnut" class="cat">
-              <img alt="" /><span><b>栗酥</b><small>奶油缅因</small></span>
-            </button>
-          </div>
-          <p id="note"></p>
-          <details id="coat">
-            <summary>用我的宠物照片配色</summary>
-            <p>
-              上传一张光线自然的正面照，点毛发取主色。角色的眼睛、耳朵和四肢继续实时响应。
-            </p>
-            <div class="row">
-              <label class="file"
-                >选择照片<input
-                  id="photo"
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp" /></label
-              ><label>主色 <input class="color" id="fur" type="color" /></label
-              ><label>眼睛 <input class="color" id="eye" type="color" /></label>
-            </div>
-            <canvas
-              id="sample"
-              hidden
-              width="240"
-              height="160"
-              style="max-width: 100%; margin-top: 8px; cursor: crosshair"
-            ></canvas
-            ><button id="restore">恢复原色</button>
-          </details>
-          <div class="section actions">
-            <button id="snap">拍张透明照</button
-            ><button id="save">导出宠物配色</button
-            ><label class="file" style="text-align: center"
-              >导入宠物配色<input
-                id="load"
-                type="file"
-                accept=".json,application/json"
-            /></label>
-          </div>
-          <p class="tip">
-            两只猫分别记住配色。导出的配色文件可在工作室或桌面伴侣载入。
-          </p>
-          <p id="status" class="status" role="status"></p>
-        </aside>
-      </section>
-    </main>
-    <div class="winbar">
-      <button id="system">跟随系统键鼠</button><button id="switch">换猫</button
-      ><button id="studio">工作室</button
-      ><button id="quit" aria-label="退出">×</button>
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light"><title>爪边 Pawside · 桌宠工作室</title>
+<link rel="stylesheet" href="workshop.css">
+</head>
+<body>
+<svg xmlns="http://www.w3.org/2000/svg" class="symbols" aria-hidden="true">
+  <symbol id="i-paw" viewBox="0 0 24 24"><g fill="currentColor" stroke="none"><ellipse cx="5.3" cy="10.3" rx="2.3" ry="3.1" transform="rotate(-25 5.3 10.3)"/><ellipse cx="9.9" cy="6.4" rx="2.35" ry="3.15" transform="rotate(-9 9.9 6.4)"/><ellipse cx="15.2" cy="6.6" rx="2.3" ry="3.1" transform="rotate(14 15.2 6.6)"/><ellipse cx="19.4" cy="10.7" rx="2.2" ry="2.9" transform="rotate(25 19.4 10.7)"/><path d="M5.4 17.3c0-2.5 2.9-3.7 4.5-6 .9-1.3 3.3-1.3 4.3.1 1.7 2.2 4.4 3.4 4.4 5.8 0 2.5-2.4 3.6-4.6 3-1.4-.4-2.5-.5-4 0-2.5.8-4.6-.5-4.6-2.9z"/></g></symbol>
+  <symbol id="i-pen" viewBox="0 0 24 24"><path d="m4 20 4.8-1.2L20 7.5 16.4 4 5.2 15.3 4 20Zm9.9-13.3 3.5 3.4"/></symbol>
+  <symbol id="i-cube" viewBox="0 0 24 24"><path d="m12 3 8.5 4.7v8.6L12 21l-8.5-4.7V7.7L12 3ZM3.8 7.9l8.2 4.7 8.2-4.7M12 12.6v8"/></symbol>
+  <symbol id="i-pixel" viewBox="0 0 24 24"><path d="M4 4h6v6H4zm10 0h6v6h-6zM4 14h6v6H4zm10 0h6v6h-6z"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M7 3h11a2 2 0 0 1 2 2v15H7a3 3 0 0 1 0-6h13M4 17V6a3 3 0 0 1 3-3Zm6 1v6l2-1.6 2 1.6V4"/></symbol>
+  <symbol id="i-knobs" viewBox="0 0 24 24"><path d="M4 7h5m5 0h6M4 17h9m5 0h2"/><circle cx="11.5" cy="7" r="2.5"/><circle cx="15.5" cy="17" r="2.5"/></symbol>
+  <symbol id="i-heart" viewBox="0 0 24 24"><path d="M20.4 5.7a4.8 4.8 0 0 0-7.2 0L12 7l-1.2-1.3a4.8 4.8 0 0 0-7.2 6.4L12 20l8.4-7.9a4.8 4.8 0 0 0 0-6.4Z"/></symbol>
+  <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 7h3l1.5-2.5h7L17 7h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Z"/><circle cx="12" cy="12.5" r="3.4"/></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><path d="M14 4h6v6m-6 0 6-6M10 20H4v-6m6 0-6 6"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><rect x="2.5" y="5.5" width="19" height="13" rx="2"/><path d="M6 9h1m3 0h1m3 0h1m3 0h.2M6 12h1m3 0h1m3 0h1m3 0h.2M8.5 15.5h7"/></symbol>
+</svg>
+<header class="site-header">
+  <div class="brand"><span class="brand-icon"><svg class="icon"><use href="#i-paw"/></svg></span><strong>Pawside</strong><span class="wordmark-cn">爪边</span></div>
+  <nav class="studio-nav" aria-label="工作室导航"><a class="home-link" href="../" hidden>官网</a><button class="outline with-icon" id="open-collection"><svg class="icon"><use href="#i-book"/></svg>我的收藏</button></nav>
+</header>
+<main>
+  <div class="work-title"><h1>桌宠工作室</h1>
+    <div class="styles" role="group" aria-label="画风">
+      <button data-style="paper"><svg class="icon"><use href="#i-pen"/></svg>2D</button>
+      <button data-style="volume"><svg class="icon"><use href="#i-cube"/></svg>Pawside 3D</button>
+      <button data-style="pixel"><svg class="icon"><use href="#i-pixel"/></svg>像素风</button>
     </div>
-    <script src="vendor/three.min.js"></script>
-    <script src="motion.js"></script>
-    <script src="reference.js"></script>
-    <script src="scene.js"></script>
-    <script src="studio.js"></script>
-  </body>
-</html>
+  </div>
+  <div class="work-grid">
+    <section class="preview-column" aria-label="桌宠预览">
+      <div class="stage">
+        <div class="identity"><span id="base-label"></span><h2 id="english">银杏</h2><span id="pet-breed">银灰缅因</span></div>
+        <div class="stage-tools"><button id="snap" class="icon-button" title="保存透明 PNG" aria-label="保存透明 PNG"><svg class="icon"><use href="#i-camera"/></svg></button><button id="focus" class="icon-button" title="专注视图" aria-label="专注视图"><svg class="icon"><use href="#i-expand"/></svg></button></div>
+        <div id="scene" tabindex="0" role="application" aria-label="互动桌宠，可以打字、轻抚猫头或点击键盘"><canvas id="flat-canvas"></canvas><canvas id="volume-canvas" hidden></canvas></div>
+        <div class="stage-foot"><span class="live"><i></i><span id="state">待机</span></span><div class="bg-picker" aria-label="背景颜色"><button data-bg="sage" aria-label="芽绿" title="芽绿"></button><button data-bg="oat" aria-label="暖黄" title="暖黄"></button><button data-bg="blue" aria-label="淡紫" title="淡紫"></button></div></div>
+      </div>
+      <div class="under-stage"><div class="views" role="group" aria-label="观察视角"><button data-view="desk" aria-pressed="true">全身</button><button data-view="face">正脸</button><button data-view="angle" hidden>斜侧</button><button data-view="profile" hidden>侧面</button></div><span id="speed">0.0 键 / 秒</span></div>
+      <section class="interaction"><div class="interaction-heading"><h3><svg class="icon"><use href="#i-key"/></svg>试试互动</h3><span>点头轻抚，按键出爪</span></div>
+        <div class="action-row"><button data-act="demo">▶ 动作演示</button><button data-act="hello">打个招呼</button><button data-act="mouse">拨动鼠标</button><button data-act="rage">长按退格</button></div>
+        <details><summary>更多动作与试打</summary><div class="action-row more"><button data-act="reference">键鼠回放</button><button data-act="tempo">节奏对照</button><button data-act="hands">键鼠合奏</button><button data-act="slow">慢敲</button><button data-act="steady">连打</button><button data-act="fast">快敲</button></div><div class="trial"><input id="try-text" placeholder="在这里试打" aria-label="普通试打" autocomplete="off"><input id="try-private" type="password" placeholder="隐私试打 · 它会捂眼" aria-label="隐私试打" autocomplete="off"></div></details>
+      </section>
+    </section>
+    <aside class="inspector" aria-label="角色设置">
+      <nav class="pane-tabs" aria-label="工作室工具"><button data-pane="presets"><svg class="icon"><use href="#i-paw"/></svg>选同桌</button><button data-pane="edit"><svg class="icon"><use href="#i-knobs"/></svg>捏脸</button><button data-pane="collection"><svg class="icon"><use href="#i-heart"/></svg>收藏</button></nav>
+      <section data-panel="presets"><div class="panel-heading"><h3 id="catalog-title">角色图鉴</h3><span id="catalog-count">10 位同桌</span></div><p class="fixed-art" id="fixed-art" hidden>银虎斑缅因 · 旧版 2D 原图</p><div id="look-presets"></div><button id="quick-edit" class="primary wide with-icon"><svg class="icon"><use href="#i-knobs"/></svg>捏捏这张脸</button></section>
+      <section data-panel="edit" hidden><div class="panel-heading"><h3>捏脸台</h3><button id="peek-face" class="text-btn">看正脸</button></div>
+        <label class="setting">性格<select id="temper"></select></label><div id="look-tabs" aria-label="调整部位"></div>
+        <div class="panel-heading small"><h4 id="look-group-title">头脸</h4><button class="text-btn" id="reset-group">还原本组</button></div><label id="coat-link" class="check" hidden><input type="checkbox" id="link-coat">主毛色联动阴影</label><div id="look-fields"></div>
+        <details class="photo"><summary>从宠物照片取色</summary><label class="file">选择照片<input id="photo" type="file" accept="image/png,image/jpeg,image/webp"></label><canvas id="sample" width="248" height="135" hidden aria-label="点击照片取毛色"></canvas></details>
+        <button id="restore" class="outline wide">还原当前角色预设</button>
+      </section>
+      <section data-panel="collection" hidden><div class="panel-heading"><h3>我的收藏</h3></div>
+        <label class="field-name">角色名字<input id="skin-name" maxlength="36" autocomplete="off" placeholder="给它起个名字"></label>
+        <button id="keep-skin" class="primary wide with-icon"><svg class="icon"><use href="#i-heart"/></svg>保存当前角色</button>
+        <label class="field-name">已收藏角色<select id="pick-skin"></select></label><button id="delete-skin" class="text-btn" hidden>删除此收藏</button>
+        <div class="collection-files"><button id="save" class="outline">导出角色</button><label class="file">导入角色<input id="load" type="file" accept=".json,application/json"></label></div>
+      </section>
+      <div id="status" role="status" aria-live="polite"></div>
+    </aside>
+  </div>
+  <div id="fail" role="alert" hidden></div>
+</main>
+<nav class="mini-bar" aria-label="桌宠控制"><span class="drag-handle">爪边 ⠿</span><button id="mode-next">换画风</button><button id="switch">换同桌</button><button id="studio">工作室</button><button id="system">跟随系统键鼠</button><button id="quit" title="退出">×</button></nav>
+<script src="vendor/three.min.js"></script><script src="motion.js"></script><script src="frame-loop.js"></script><script src="reference.js"></script><script src="looks.js"></script><script src="scene.js"></script><script src="illustration.js"></script><script src="assets/maine-coon-image.js"></script><script src="legacy-2d.js"></script><script src="pixel.js"></script><script src="drawing.js"></script><script src="studio.js"></script>
+</body></html>

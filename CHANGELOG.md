@@ -4,7 +4,7 @@
 
 ### ✨ Features
 
-- Added the optional Pawside 3D companion with two cats, per-key reactions, mouse button chords, scrolling, one-paw typing, graded Backspace reactions, a reference replay and protected-input poses.
+- Added the optional Pawside companion with 2D, 3D, and pixel-art styles, keyboard and mouse reactions, protected-input poses, and a browser studio deployable from Git with Cloudflare Pages.
 
 ## 2.4.1 - 2026-10-28
 
